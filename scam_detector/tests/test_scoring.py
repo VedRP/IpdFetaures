@@ -68,6 +68,14 @@ def test_explain_label_is_risk_label() -> None:
     assert isinstance(result.label, RiskLabel)
 
 
+def test_explain_result_has_decision_and_scam_score() -> None:
+    fv = FeatureVector()
+    result = explain(apply_rules(fv), apply_risk_engine(fv), fv)
+    assert result.decision in ("clear", "review", "block")
+    assert 0.0 <= result.scam_score <= 100.0
+    assert 0.0 <= result.confidence <= 1.0
+
+
 # ── Full pipeline ─────────────────────────────────────────────────────────────
 
 def test_pipeline_run_returns_scam_score_result() -> None:

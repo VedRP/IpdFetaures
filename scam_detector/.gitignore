@@ -6,6 +6,10 @@ models/*.bin
 models/*.pt
 models/*.h5
 
+# Human-review feedback stores (may contain operational notes)
+feedback_data/
+*.feedback.jsonl
+
 # Python
 __pycache__/
 *.py[cod]

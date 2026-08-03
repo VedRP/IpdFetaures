@@ -9,9 +9,9 @@ record can be compared against every other.
 
 Architecture
 ------------
-Embeddings: ``sentence-transformers/all-MiniLM-L6-v2`` — same model used in
-``text_features.title_summary_alignment`` so the two modules share a single
-loaded instance (the model is cached via ``@lru_cache`` in text_features.py).
+Embeddings: model name from ``config.cfg.embeddings.sbert_model_name``
+(same constant as Prompt 2's ``title_summary_alignment``).  Both modules
+share one loaded instance via ``text_features._sbert_model`` (``@lru_cache``).
 
 Nearest-neighbour index: ``sklearn.NearestNeighbors`` with cosine metric.
 

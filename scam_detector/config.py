@@ -9,6 +9,9 @@ Import anywhere via:
 """
 
 from __future__ import annotations
+
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -21,6 +24,24 @@ class ScoringWeights(BaseModel):
     stipend_weight: float = Field(default=0.15, ge=0.0, le=1.0)
     temporal_weight: float = Field(default=0.10, ge=0.0, le=1.0)
     structural_weight: float = Field(default=0.10, ge=0.0, le=1.0)
+
+
+class BlendWeights(BaseModel):
+    """
+    Weights for blending rules-engine score with anomaly-model score.
+
+    Default: 60% rules / 40% anomaly.
+
+    Rationale: rules are more precise early on because they are grounded in
+    Phase 1's actual corpus findings.  The anomaly-model weight should
+    increase over time as more data accumulates and the IsolationForest
+    (or a future supervised model) becomes better calibrated — tune
+    ``anomaly_weight`` upward (and ``rules_weight`` downward) without
+    touching scoring code.
+    """
+
+    rules_weight: float = Field(default=0.60, ge=0.0, le=1.0)
+    anomaly_weight: float = Field(default=0.40, ge=0.0, le=1.0)
 
 
 class RuleWeights(BaseModel):
@@ -71,11 +92,57 @@ class RuleThresholds(BaseModel):
 
 
 class Thresholds(BaseModel):
-    """Decision boundaries for risk classification."""
+    """
+    Legacy 0–1 decision boundaries (kept for older callers).
+
+    Prefer :class:`DecisionThresholds` for the Phase 5 scam_score (0–100) path.
+    """
 
     auto_approve_below: float = Field(default=0.25, ge=0.0, le=1.0)
     pending_review_below: float = Field(default=0.55, ge=0.0, le=1.0)
     # scores >= pending_review_below are classified as high-risk / auto-rejected
+
+
+class DecisionThresholds(BaseModel):
+    """
+    Explicit Phase 5 decision thresholds on the 0–100 ``scam_score`` scale.
+
+    Defaults: score < 30 → clear, 30–70 → review, ≥ 70 → block.
+    Easy to tune per deployment without changing scoring code.
+    """
+
+    clear_below: float = Field(
+        default=30.0,
+        ge=0.0,
+        le=100.0,
+        description="scam_score strictly below this → clear (unless confidence forces review)",
+    )
+    block_at_or_above: float = Field(
+        default=70.0,
+        ge=0.0,
+        le=100.0,
+        description="scam_score at or above this → block",
+    )
+
+
+class ConfidenceConfig(BaseModel):
+    """Confidence banding and low-confidence decision override."""
+
+    low_below: float = Field(
+        default=0.40,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Confidence below this forces decision to at least 'review' — "
+            "a low-confidence 'clear' is misleading given Phase 1 unreliable fields."
+        ),
+    )
+    medium_below: float = Field(
+        default=0.70,
+        ge=0.0,
+        le=1.0,
+        description="Confidence in [low_below, medium_below) → medium; else high",
+    )
 
 
 class FeatureFlags(BaseModel):
@@ -90,14 +157,40 @@ class FeatureFlags(BaseModel):
     enable_ml_risk_engine: bool = False  # off until a trained model is present
 
 
+class EmbeddingConfig(BaseModel):
+    """
+    Shared sentence-embedding settings for Prompt 2 (text features) and
+    Prompt 5 (duplicate index).  Both modules must read ``sbert_model_name``
+    from here — never hardcode the model string in two places.
+    """
+
+    sbert_model_name: str = Field(
+        default="all-MiniLM-L6-v2",
+        description=(
+            "sentence-transformers model id used by title_summary_alignment, "
+            "boilerplate_similarity, and DuplicateIndex.  Swap to e.g. "
+            "all-mpnet-base-v2 for higher quality at higher cost."
+        ),
+    )
+
+
 class Config(BaseModel):
     """Top-level config object — instantiate once and share."""
 
     weights: ScoringWeights = Field(default_factory=ScoringWeights)
+    blend_weights: BlendWeights = Field(default_factory=BlendWeights)
     rule_weights: RuleWeights = Field(default_factory=RuleWeights)
     rule_thresholds: RuleThresholds = Field(default_factory=RuleThresholds)
     thresholds: Thresholds = Field(default_factory=Thresholds)
+    decision_thresholds: DecisionThresholds = Field(default_factory=DecisionThresholds)
+    confidence: ConfidenceConfig = Field(default_factory=ConfidenceConfig)
+    embeddings: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     flags: FeatureFlags = Field(default_factory=FeatureFlags)
+
+    # When Prompt 6 rule 1 (hard_disqualifying_signals) fires, force this
+    # decision regardless of the blended score.  Some deployments prefer
+    # human review even on the clearest cases rather than full auto-block.
+    hard_disqualifying_decision: Literal["block", "review"] = "block"
 
 
 # Module-level singleton — override fields as needed in tests or via env vars.

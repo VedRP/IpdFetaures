@@ -13,12 +13,12 @@ returns a :class:`TextFeatureVector` pydantic model.
 
 Sentence-transformer note
 --------------------------
-``title_summary_alignment`` and ``boilerplate_similarity`` use
-``sentence-transformers/all-MiniLM-L6-v2`` (384-d, ~80 MB).  The model is
-loaded **lazily** via a module-level singleton so it is loaded at most once
-per process.  If the library is not installed the functions degrade
-gracefully and return ``0.0``.  To swap in a larger model (e.g.
-``all-mpnet-base-v2``) change ``_SBERT_MODEL_NAME`` below.
+``title_summary_alignment`` and ``boilerplate_similarity`` use the model
+named in ``config.cfg.embeddings.sbert_model_name`` (default
+``all-MiniLM-L6-v2``, 384-d, ~80 MB).  Prompt 5's ``DuplicateIndex`` loads
+the same singleton — change the name only in ``config.py``.  The model is
+loaded **lazily** at most once per process; if sentence-transformers is
+missing the functions degrade to ``0.0``.
 """
 
 from __future__ import annotations
@@ -32,17 +32,18 @@ from typing import Any
 import numpy as np
 from pydantic import BaseModel, Field
 
+from scam_detector.config import cfg as _cfg
+
 # ---------------------------------------------------------------------------
 # Lazy sentence-transformers import
 # ---------------------------------------------------------------------------
-_SBERT_MODEL_NAME = "all-MiniLM-L6-v2"   # swap here for a larger model
 
 
 def _get_sbert():
     """Return a cached SentenceTransformer instance, or None if unavailable."""
     try:
         from sentence_transformers import SentenceTransformer  # type: ignore
-        return SentenceTransformer(_SBERT_MODEL_NAME)
+        return SentenceTransformer(_cfg.embeddings.sbert_model_name)
     except Exception:
         return None
 
@@ -305,7 +306,7 @@ def title_summary_alignment(title: str, summary: str) -> float:
     unrelated to the advertised title — a common pattern in copy-pasted or
     auto-generated scam postings.
 
-    Model: ``all-MiniLM-L6-v2`` (swappable via ``_SBERT_MODEL_NAME``).
+    Model: ``cfg.embeddings.sbert_model_name`` (shared with DuplicateIndex).
     Falls back to 0.0 if sentence-transformers is not installed.
 
     Returns
