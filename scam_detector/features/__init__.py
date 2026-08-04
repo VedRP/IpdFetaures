@@ -78,22 +78,121 @@ def extract_all(
     """
     Run all feature extractors against a remediated record and return a
     unified :class:`FeatureVector`.
-
-    Text and company/URL extractors are fully implemented.
-    Other extractors (stipend, temporal, structural) remain stubs.
     """
+    from typing import Any
+    from scam_detector.features.stipend_features import (
+        normalize_stipend_to_hourly_inr,
+        stipend_zscore,
+        stipend_perk_consistency_check,
+    )
+    from scam_detector.features.temporal_features import (
+        posting_burst_score,
+        deadline_urgency_score,
+    )
+    from scam_detector.features.structural_features import (
+        field_completeness_score,
+        openings_zscore,
+    )
+
     raw: dict = record.record if hasattr(record, "record") else record  # type: ignore[union-attr]
     flags: dict = record.flags if hasattr(record, "flags") else {}      # type: ignore[union-attr]
 
     raw_with_flags = {**raw, "_flags": flags}
     batch = all_records or [raw]
 
+    # Company / URL
     cu = extract_company_url_features(raw_with_flags, all_records=batch, flags=flags)
+
+    # Stipend
+    hourly = normalize_stipend_to_hourly_inr(raw.get("stipend") or {}, raw.get("duration") or {})
+    
+    # Peer group logic for z-scores
+    def _as_str_set(value: Any) -> set[str]:
+        if not value:
+            return set()
+        if isinstance(value, str):
+            return {value.strip().lower()} if value.strip() else set()
+        if isinstance(value, list):
+            return {str(v).strip().lower() for v in value if v and str(v).strip()}
+        return set()
+
+    def _jaccard(a: set[str], b: set[str]) -> float:
+        if not a and not b:
+            return 0.0
+        union = a | b
+        if not union:
+            return 0.0
+        return len(a & b) / len(union)
+
+    def _build_peer_group(rec: dict[str, Any], corpus: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        own_labels = _as_str_set(rec.get("field")) | _as_str_set(rec.get("tags"))
+        own_remote = bool(rec.get("isRemote"))
+        peers: list[dict[str, Any]] = []
+        for other in corpus:
+            if bool(other.get("isRemote")) != own_remote:
+                continue
+            other_labels = _as_str_set(other.get("field")) | _as_str_set(other.get("tags"))
+            if not own_labels or not other_labels:
+                peers.append(other)
+                continue
+            if _jaccard(own_labels, other_labels) >= 0.20:
+                peers.append(other)
+        return peers if peers else list(corpus)
+
+    peer_group = _build_peer_group(raw, batch)
+    peer_z = stipend_zscore(raw, peer_group)
+    contradiction = stipend_perk_consistency_check(raw)
+    stipend_type = str((raw.get("stipend") or {}).get("type") or "unknown")
+
+    stipend = StipendFeatures(
+        peer_zscore=peer_z,
+        hourly_inr=hourly,
+        perk_consistency_ok=not contradiction,
+        stipend_type=stipend_type,
+        is_outlier_high=bool(peer_z is not None and peer_z > 3.0),
+        is_outlier_low=bool(peer_z is not None and peer_z < -2.0),
+        amount_plausibility_score=1.0 if hourly is not None else 0.5,
+        missing_stipend_for_role=hourly is None,
+    )
+
+    # Temporal
+    company_key = (raw.get("company") or "").strip().lower()
+    company_recs = [
+        r for r in batch
+        if (r.get("company") or "").strip().lower() == company_key
+    ] if company_key else [raw]
+    
+    burst = posting_burst_score(raw, company_recs)
+    temporal = TemporalFeatures(
+        posting_burst_count=int(burst.get("burst_count") or 0),
+        posting_burst_cadence=burst.get("cadence_days"),
+        deadline_urgency_score=deadline_urgency_score(raw),
+    )
+
+    # Structural
+    completeness = field_completeness_score(raw)
+    oz = openings_zscore(raw, peer_group)
+    skills = raw.get("skills") or []
+    skills_count = len(skills) if isinstance(skills, list) else 0
+    resp = raw.get("responsibilities") or []
+    resp_count = len(resp) if isinstance(resp, list) else 0
+
+    structural = StructuralFeatures(
+        openings_zscore=oz,
+        field_completeness=completeness,
+        completeness_ratio=completeness,
+        skills_count=skills_count,
+        skills_count_anomaly=skills_count < 1 or skills_count > 30,
+        responsibilities_count=resp_count,
+    )
 
     return FeatureVector(
         text=extract_text_features(raw_with_flags),
         company=cu.company,
         url=cu.url,
+        stipend=stipend,
+        temporal=temporal,
+        structural=structural,
     )
 
 

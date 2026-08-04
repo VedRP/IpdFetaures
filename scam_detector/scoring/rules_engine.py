@@ -423,16 +423,17 @@ class TyposquatDomainRule:
         w = self._cfg.rule_weights.typosquat_domain
         threshold = self._cfg.rule_thresholds.typosquat_similarity_threshold
 
-        # Skip if platform-internal or known ATS — mismatch is expected there
-        if inp.is_platform_internal or inp.is_known_ats:
+        # Skip if platform-internal, known ATS, or suspect company (identity unreliable)
+        if inp.company_is_suspect or inp.is_platform_internal or inp.is_known_ats:
             return RuleFinding(
                 rule_id=self.rule_id,
                 description="Domain vs company name mismatch (off-platform)",
                 weight=w,
                 triggered=False,
                 explanation=(
-                    "Apply link is platform-internal or a known ATS — "
-                    "domain mismatch is expected and not suspicious."
+                    "Apply link is platform-internal or a known ATS, or the company "
+                    "name is suspect/scraper noise — domain mismatch is expected or "
+                    "unverifiable and not suspicious."
                 ),
             )
 

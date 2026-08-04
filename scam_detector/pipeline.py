@@ -385,8 +385,10 @@ def process_records(
     for i, rec in enumerate(records):
         if not any(rec.get(k) for k in ("_id", "id", "internship_id")):
             rec = {**rec, "_id": f"pipeline-row-{i}"}
-            records[i] = rec
-            remediated[i] = RemediatedRecord(record=rec, flags=flags_list[i])
+        # Add flags to record so downstream steps can access flags easily
+        rec = {**rec, "_flags": flags_list[i]}
+        records[i] = rec
+        remediated[i] = RemediatedRecord(record=rec, flags=flags_list[i])
 
     # ── Corpus structures (once) ──────────────────────────────────────────
     neighbors_by_id = _build_duplicate_neighbors(records)

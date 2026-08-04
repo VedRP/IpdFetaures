@@ -608,3 +608,18 @@ class TestCrossCompanyDuplicateFlag:
         corpus = [SCAM_SHELL_A, same_co, diff_co]
         neighbors = [("same-co", 0.99), ("diff-co", 0.98)]
         assert cross_company_duplicate_flag(SCAM_SHELL_A, neighbors, corpus) is True
+
+    def test_suspect_company_bypasses_cross_company_flag(self) -> None:
+        suspect_rec = {**SCAM_SHELL_A, "_flags": {"company_suspect": True}}
+        corpus = [suspect_rec, SCAM_SHELL_B]
+        neighbors = [("scam-shell-b", 0.99)]
+        # Own company is suspect → should NOT fire
+        assert cross_company_duplicate_flag(suspect_rec, neighbors, corpus) is False
+
+    def test_neighbour_suspect_company_is_skipped(self) -> None:
+        suspect_neighbour = {**SCAM_SHELL_B, "_flags": {"company_suspect": True}}
+        corpus = [SCAM_SHELL_A, suspect_neighbour]
+        neighbors = [("scam-shell-b", 0.99)]
+        # Neighbour company is suspect → should NOT fire
+        assert cross_company_duplicate_flag(SCAM_SHELL_A, neighbors, corpus) is False
+

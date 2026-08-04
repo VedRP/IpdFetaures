@@ -461,17 +461,26 @@ def cross_company_duplicate_flag(
     if not duplicate_neighbors:
         return False
 
+    own_flags = record.get("_flags") or {}
+    if own_flags.get("company_suspect"):
+        return False
+
     own_company = (record.get("company") or "").strip().lower()
 
-    # Build a lookup from record_id → company for fast access.
+    # Build a lookup from record_id → (company, suspect_flag) for fast access.
     # If all_records is large this is O(N) but only done once per call.
-    id_to_company: dict[str, str] = {}
+    id_to_company_info: dict[str, tuple[str, bool]] = {}
     for i, r in enumerate(all_records):
         rid = _record_id(r, i)
-        id_to_company[rid] = (r.get("company") or "").strip().lower()
+        co = (r.get("company") or "").strip().lower()
+        r_flags = r.get("_flags") or {}
+        suspect = bool(r_flags.get("company_suspect"))
+        id_to_company_info[rid] = (co, suspect)
 
     for neighbour_id, _sim in duplicate_neighbors:
-        neighbour_company = id_to_company.get(neighbour_id, "")
+        neighbour_company, neighbour_suspect = id_to_company_info.get(neighbour_id, ("", False))
+        if neighbour_suspect:
+            continue
         if neighbour_company and neighbour_company != own_company:
             return True
 
