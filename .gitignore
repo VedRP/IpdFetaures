@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 .env
 checkpoint_internships.json
 __pycache__/
@@ -7,3 +8,13 @@ __pycache__/
 data/
 scrapers/**/__pycache__/
 scrapers/**/*.json
+=======
+﻿.env
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.venv/
+*.egg-info/
+.wdm/
+>>>>>>> 7a99c785c15cfc524d32a9d883ac9d5bcdc31702
