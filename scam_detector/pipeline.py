@@ -276,7 +276,13 @@ def _enrich_feature_vector(
     )
     peer_z = stipend_zscore(raw, peer_group)
     contradiction = stipend_perk_consistency_check(raw)
-    stipend_type = str((raw.get("stipend") or {}).get("type") or "unknown")
+    stipend_val = raw.get("stipend")
+    if isinstance(stipend_val, str):
+        stipend_type = stipend_val.strip().lower()
+    elif isinstance(stipend_val, dict):
+        stipend_type = str(stipend_val.get("type") or "unknown")
+    else:
+        stipend_type = "unknown"
 
     stipend = StipendFeatures(
         peer_zscore=peer_z,

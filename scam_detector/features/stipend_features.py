@@ -279,8 +279,14 @@ def stipend_perk_consistency_check(record: dict[str, Any]) -> bool:
     bool
         ``True`` → internal contradiction detected.
     """
-    stipend = record.get("stipend") or {}
-    stype = (stipend.get("type") or "").strip().lower()
+    stipend = record.get("stipend")
+    if isinstance(stipend, str):
+        stype = stipend.strip().lower()
+    elif isinstance(stipend, dict):
+        stype = (stipend.get("type") or "").strip().lower()
+    else:
+        stype = ""
+
 
     if stype != "unpaid":
         return False  # only relevant when claimed unpaid
