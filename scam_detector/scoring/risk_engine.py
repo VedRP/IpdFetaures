@@ -110,11 +110,20 @@ def compute_confidence_score(record: Any, features: Any | None = None) -> float:
         _get_nested(src, "company", "is_suspect", default=False)
     )
     degree_suspect = bool(flags.get("degree_suspect_default"))
+    deadline_missing = bool(flags.get("deadline_missing"))
 
     if company_suspect:
         confidence *= 0.55
     if degree_suspect:
         confidence *= 0.75
+    if deadline_missing:
+        confidence *= 0.85
+
+    # Check if sentence-transformers is installed (SBERT available)
+    from scam_detector.features.text_features import _sbert_model
+    if _sbert_model() is None:
+        # Lower confidence due to missing optional dependency for semantic features
+        confidence *= 0.80
 
     return round(max(0.0, min(1.0, confidence)), 4)
 
