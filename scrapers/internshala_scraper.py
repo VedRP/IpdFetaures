@@ -66,8 +66,107 @@ def parse_stipend(stipend_text: str) -> dict:
     }
 
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+def _fetch_detail_page(item: dict, session: requests.Session, headers: dict) -> dict:
+    """Fetch detail page concurrently for a single internship item."""
+    apply_link = item.get("apply_link")
+    if not apply_link or apply_link == "https://internshala.com":
+        return item
+
+    try:
+        detail_resp = session.get(apply_link, headers=headers, timeout=6)
+        if detail_resp.status_code != 200:
+            return item
+
+        detail_soup = BeautifulSoup(detail_resp.content, 'html.parser')
+        main_container = detail_soup.find('div', class_='detail_view') or detail_soup.find('div', class_='internship_details') or detail_soup
+
+        # Location
+        detail_location = main_container.find('div', id='location_names')
+        if detail_location:
+            loc_link = detail_location.find('a')
+            if loc_link:
+                item["location"] = loc_link.text.strip()
+
+        # Duration & Deadline & Stipend
+        detail_items = main_container.find_all('div', class_='other_detail_item')
+        duration_found = False
+        for d_item in detail_items:
+            heading = d_item.find('span')
+            if not heading:
+                continue
+            heading_text = heading.text.lower()
+
+            if 'duration' in heading_text and not duration_found:
+                body = d_item.find('div', class_='item_body')
+                if body:
+                    item["duration_string"] = body.text.strip()
+                    duration_found = True
+            elif 'apply by' in heading_text:
+                body = d_item.find('div', class_='item_body')
+                if body:
+                    item["deadline_text"] = body.text.strip()
+            elif 'stipend' in heading_text:
+                stip_span = d_item.find('span', class_='stipend')
+                if stip_span:
+                    item["stipend_text"] = stip_span.text.strip()
+                    item["stipend"] = parse_stipend(item["stipend_text"])
+
+        # Skills
+        skills_heading = main_container.find('h3', class_='skills_heading')
+        if skills_heading:
+            skills_container = skills_heading.find_next_sibling('div', class_='round_tabs_container')
+            if skills_container:
+                extracted = [s.text.strip() for s in skills_container.find_all('span', class_='round_tabs') if s.text.strip()]
+                if extracted:
+                    item["skills"] = extracted
+
+        # Perks
+        perks_heading = main_container.find('h3', class_='perks_heading')
+        if perks_heading:
+            perks_container = perks_heading.find_next_sibling('div', class_='round_tabs_container')
+            if perks_container:
+                item["perks"] = [p.text.strip() for p in perks_container.find_all('span', class_='round_tabs') if p.text.strip()]
+
+        # Openings
+        openings_heading = main_container.find('h3', string=lambda t: t and 'number of openings' in t.lower())
+        if openings_heading:
+            openings_div = openings_heading.find_next_sibling('div', class_='text-container')
+            if openings_div:
+                try:
+                    item["openings"] = int(openings_div.text.strip())
+                except ValueError:
+                    pass
+
+        # Responsibilities
+        about_heading = main_container.find('h2', class_='about_heading')
+        if about_heading:
+            desc_div = about_heading.find_next_sibling('div', class_='text-container')
+            if desc_div:
+                text = desc_div.get_text(separator='\n', strip=True)
+                item["responsibilities"] = [line.strip() for line in text.split('\n') if line.strip()]
+
+        # Company info
+        company_heading = main_container.find('h2', string=lambda t: t and 'about' in t.lower() and item["company"].lower() in t.lower())
+        if company_heading:
+            website_div = company_heading.find_next_sibling('div', class_='website_link')
+            if website_div:
+                link = website_div.find('a')
+                if link:
+                    item["company_website"] = link.get('href', '').strip()
+
+            about_div = company_heading.find_next_sibling('div', class_='about_company_text_container')
+            if about_div:
+                item["about_company"] = about_div.text.strip()
+
+    except Exception as exc:
+        pass
+    return item
+
+
 def scrape_internshala_internships(max_internships=None):
-    """Scrape internships from Internshala"""
+    """Scrape internships from Internshala with session pooling & concurrency."""
 
     if max_internships is None:
         max_internships = MAX_INTERNSHIPS
@@ -76,29 +175,26 @@ def scrape_internshala_internships(max_internships=None):
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
 
-    url = "https://internshala.com/internships/software-development-internship/"
+    session = requests.Session()
+    adapter = requests.adapters.HTTPAdapter(pool_connections=20, pool_maxsize=20)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
 
+    url = "https://internshala.com/internships/software-development-internship/"
     print(f"Fetching internships from Internshala...")
 
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        response = session.get(url, headers=headers, timeout=8)
         response.raise_for_status()
 
         soup = BeautifulSoup(response.content, 'html.parser')
-
-        internships = []
-
-        # Each internship is a div.individual_internship with an internshipid attribute
         internship_cards = soup.find_all('div', class_='individual_internship')
-
         print(f"Found {len(internship_cards)} internship cards")
 
+        base_items = []
         for card in internship_cards[:max_internships]:
             try:
                 internship_id = card.get('internshipid', '')
-
-                # --- Title & apply link ---
-                # Listing page: a.job-title-href inside h2.job-internship-name
                 title_elem = card.find('a', class_='job-title-href')
                 if title_elem:
                     position = title_elem.text.strip()
@@ -108,16 +204,10 @@ def scrape_internshala_internships(max_internships=None):
                     href = card.get('data-href', '')
 
                 apply_link = ("https://internshala.com" + href) if href else "https://internshala.com"
-
-                # --- Company name ---
-                # Listing page: p.company-name
                 company_elem = card.find('p', class_='company-name')
                 company = company_elem.text.strip() if company_elem else "Unknown Company"
 
-                # --- Location & Duration ---
-                # Listing page: div.detail-row-1 > div.row-1-item (1=location, 2=stipend, 3=duration)
                 row_items = card.find_all('div', class_='row-1-item')
-
                 location_text = "Remote"
                 for item in row_items:
                     if 'locations' in item.get('class', []):
@@ -125,138 +215,21 @@ def scrape_internshala_internships(max_internships=None):
                         break
 
                 is_remote = bool(re.search(r'work from home|remote|wfh', location_text, re.IGNORECASE))
-
-                # --- Stipend ---
                 stipend_elem = card.find('span', class_='stipend')
                 stipend_text = stipend_elem.text.strip() if stipend_elem else ""
                 stipend = parse_stipend(stipend_text)
 
-                # --- Duration ---
-                # 3rd row-1-item span (after location and stipend items)
                 duration_text = ""
                 non_location_items = [i for i in row_items if 'locations' not in i.get('class', [])]
                 for item in non_location_items:
                     span = item.find('span')
-                    if span and not span.get('class'):  # plain span = duration (stipend has class)
+                    if span and not span.get('class'):
                         duration_text = span.text.strip()
                         break
 
-                # --- Skills ---
-                # Skills are NOT on listing cards — fetched from detail page below
-                skills = []
-
-                # --- Deadline ---
-                deadline_text = ""
-
-                # --- Fetch detail page for additional fields ---
-                # Listing card has limited info; detail page has city, duration, deadline, skills, perks, etc.
                 card_skills = [s.text.strip() for s in card.find_all('div', class_='job_skill') if s.text.strip()]
-                skills = card_skills
-                perks = []
-                openings = None
-                responsibilities = ""
-                about_company = ""
-                company_website = ""
 
-                if apply_link and apply_link != "https://internshala.com":
-                    try:
-                        time.sleep(0.5)  # be polite
-                        detail_resp = requests.get(apply_link, headers=headers, timeout=10)
-                        detail_soup = BeautifulSoup(detail_resp.content, 'html.parser')
-
-                        # IMPORTANT: Only look in the main internship container, not similar/recommended internships
-                        main_container = detail_soup.find('div', class_='detail_view') or detail_soup.find('div', class_='internship_details') or detail_soup
-
-                        # --- City (overrides listing location if present) ---
-                        detail_location = main_container.find('div', id='location_names')
-                        if detail_location:
-                            loc_link = detail_location.find('a')
-                            if loc_link:
-                                location_text = loc_link.text.strip()
-
-                        # --- Duration (overrides listing duration) ---
-                        detail_items = main_container.find_all('div', class_='other_detail_item')
-                        duration_found = False
-                        for item in detail_items:
-                            heading = item.find('span')
-                            if not heading:
-                                continue
-                            heading_text = heading.text.lower()
-
-                            if 'duration' in heading_text and not duration_found:
-                                body = item.find('div', class_='item_body')
-                                if body:
-                                    duration_text = body.text.strip()
-                                    duration_found = True
-                                    print(f"    Found duration in detail page: {duration_text}")
-
-                            elif 'apply by' in heading_text:
-                                body = item.find('div', class_='item_body')
-                                if body:
-                                    deadline_text = body.text.strip()
-
-                            elif 'stipend' in heading_text:
-                                # Re-parse stipend from detail page (more reliable)
-                                stip_span = item.find('span', class_='stipend')
-                                if stip_span:
-                                    stipend_text = stip_span.text.strip()
-                                    stipend = parse_stipend(stipend_text)
-
-                        # --- Skills ---
-                        skills_heading = main_container.find('h3', class_='skills_heading')
-                        if skills_heading:
-                            skills_container = skills_heading.find_next_sibling('div', class_='round_tabs_container')
-                            if skills_container:
-                                skills = [s.text.strip() for s in skills_container.find_all('span', class_='round_tabs') if s.text.strip()]
-
-                        # --- Perks ---
-                        perks_heading = main_container.find('h3', class_='perks_heading')
-                        if perks_heading:
-                            perks_container = perks_heading.find_next_sibling('div', class_='round_tabs_container')
-                            if perks_container:
-                                perks = [p.text.strip() for p in perks_container.find_all('span', class_='round_tabs') if p.text.strip()]
-
-                        # --- Number of openings ---
-                        openings_heading = main_container.find('h3', string=lambda t: t and 'number of openings' in t.lower())
-                        if openings_heading:
-                            openings_div = openings_heading.find_next_sibling('div', class_='text-container')
-                            if openings_div:
-                                try:
-                                    openings = int(openings_div.text.strip())
-                                except:
-                                    pass
-
-                        # --- Responsibilities (job description) ---
-                        about_heading = main_container.find('h2', class_='about_heading')
-                        if about_heading:
-                            desc_div = about_heading.find_next_sibling('div', class_='text-container')
-                            if desc_div:
-                                # Split into array of responsibilities (by line breaks or bullet points)
-                                text = desc_div.get_text(separator='\n', strip=True)
-                                # Split by newlines and filter out empty lines
-                                responsibilities = [line.strip() for line in text.split('\n') if line.strip()]
-
-                        # --- Company info ---
-                        company_heading = main_container.find('h2', string=lambda t: t and 'about' in t.lower() and company.lower() in t.lower())
-                        if company_heading:
-                            website_div = company_heading.find_next_sibling('div', class_='website_link')
-                            if website_div:
-                                link = website_div.find('a')
-                                if link:
-                                    company_website = link.get('href', '').strip()
-
-                            about_div = company_heading.find_next_sibling('div', class_='about_company_text_container')
-                            if about_div:
-                                about_company = about_div.text.strip()
-
-                        if not skills:
-                            skills = card_skills
-                        print(f"  Parsed '{position}': city={location_text}, duration={duration_text}, skills={len(skills)}, perks={len(perks)}")
-
-                    except Exception as e:
-                        print(f"  Could not fetch detail page for '{position}': {e}")
-
-                internships.append({
+                base_items.append({
                     "internship_id": internship_id,
                     "company": company,
                     "name": position,
@@ -266,19 +239,29 @@ def scrape_internshala_internships(max_internships=None):
                     "stipend_text": stipend_text,
                     "stipend": stipend,
                     "duration_string": duration_text,
-                    "skills": skills,
-                    "deadline_text": deadline_text,
-                    "perks": perks,
-                    "openings": openings,
-                    "responsibilities": responsibilities,
-                    "about_company": about_company,
-                    "company_website": company_website,
+                    "skills": card_skills,
+                    "deadline_text": "",
+                    "perks": [],
+                    "openings": None,
+                    "responsibilities": [],
+                    "about_company": "",
+                    "company_website": "",
                     "source": "web_scraping",
                 })
-
             except Exception as e:
-                print(f"Error parsing internship card: {e}")
+                print(f"Error parsing card: {e}")
                 continue
+
+        # Concurrent detail page fetching
+        print(f"Fetching details for {len(base_items)} items concurrently...")
+        internships = []
+        with ThreadPoolExecutor(max_workers=12) as executor:
+            futures = [executor.submit(_fetch_detail_page, item, session, headers) for item in base_items]
+            for future in as_completed(futures):
+                try:
+                    internships.append(future.result())
+                except Exception as exc:
+                    pass
 
         print(f"Successfully scraped {len(internships)} internships from Internshala")
         return internships
@@ -288,8 +271,47 @@ def scrape_internshala_internships(max_internships=None):
         return []
 
 
-def enrich_with_ai(internships, co):
-    """Use Cohere to enrich internship data with fields not available in the HTML"""
+
+def fast_heuristic_enrichment(internship: dict) -> dict:
+    """Instant local enrichment without external API latency."""
+    name = (internship.get("name") or "").lower()
+    company = internship.get("company", "Company")
+    location = (internship.get("location") or "remote").lower()
+
+    degree = ["Bachelor's degree in Computer Science or related field"]
+    field = ["Computer Science", "Software Engineering"]
+
+    if "market" in name or "sales" in name:
+        field = ["Marketing", "Business Development"]
+        degree = ["Bachelor's degree in Business, Marketing, or related field"]
+    elif "design" in name or "ui" in name or "ux" in name:
+        field = ["Design", "User Experience"]
+        degree = ["Bachelor's degree in Design, Fine Arts, or related field"]
+    elif "data" in name or "analyst" in name:
+        field = ["Data Science", "Analytics"]
+        degree = ["Bachelor's degree in Data Science, Statistics, or CS"]
+
+    responsibilities = internship.get("responsibilities")
+    if isinstance(responsibilities, list) and responsibilities:
+        summary = " ".join(responsibilities[:3])[:200]
+    else:
+        summary = f"Software engineering internship at {company} involving hands-on development."
+
+    city = "remote" if any(w in location for w in ["work from home", "remote", "wfh"]) else location.strip()
+
+    return {
+        "degree": degree,
+        "field": field,
+        "summary": summary,
+        "country": "india",
+        "city": city,
+    }
+
+
+def enrich_with_ai(internships, co=None):
+    """Use Cohere to enrich internship data with fast local fallback."""
+    if not co or not os.getenv("COHERE_API_KEY"):
+        return [fast_heuristic_enrichment(item) for item in internships]
 
     prompt = f"""Given these internship postings:
 {json.dumps(internships, indent=2)}
@@ -321,28 +343,14 @@ Return ONLY the JSON array, no other text."""
         response_text = response_text.strip()
 
         enriched_data = json.loads(response_text)
-
         if isinstance(enriched_data, dict):
             enriched_data = [enriched_data]
-
         return enriched_data
 
     except Exception as e:
-        print(f"Error enriching internships: {e}")
-        return [
-            {
-                "degree": ["Bachelor's degree in Computer Science or related field"],
-                "field": ["Computer Science", "Software Engineering"],
-                "summary": (
-                    " ".join(internship.get("responsibilities", []))[:200] 
-                    if isinstance(internship.get("responsibilities"), list) 
-                    else f"Software engineering internship at {internship['company']}."
-                ),
-                "country": "india",
-                "city": internship.get("location", "remote").lower().replace(" ", "-") if internship.get("location") else "remote",
-            }
-            for internship in internships
-        ]
+        print(f"Error enriching internships with Cohere: {e} — using fast heuristic fallback")
+        return [fast_heuristic_enrichment(item) for item in internships]
+
 
 
 def main():

@@ -85,9 +85,27 @@ def scrape_github_internships(max_internships=None):
     print(f"Scraped {len(internships)} internships")
     return internships
 
-def enrich_with_ai(internships, co):
-    """Use Cohere to enrich internship data with skills, requirements, etc."""
-    
+def fast_heuristic_enrichment(internship: dict) -> dict:
+    """Instant local enrichment without external API latency."""
+    company = internship.get("company", "Company")
+    location = (internship.get("location") or "remote").lower()
+
+    return {
+        "skills": ["Python", "Software Engineering", "Git"],
+        "degree": "Bachelor's degree in Computer Science or related field",
+        "field": ["Computer Science", "Software Engineering"],
+        "experience": ["Programming experience"],
+        "summary": f"Software engineering internship at {company} working on technical projects.",
+        "country": "united-states" if "usa" in location or "united states" in location else "india",
+        "city": "remote" if "remote" in location else location.strip(),
+    }
+
+
+def enrich_with_ai(internships, co=None):
+    """Use Cohere to enrich internship data with fast local fallback."""
+    if not co or not os.getenv("COHERE_API_KEY"):
+        return [fast_heuristic_enrichment(item) for item in internships]
+
     prompt = f"""Given these internships posting:
 {internships}
 
@@ -110,8 +128,7 @@ Return ONLY the JSON array of objects, no other text."""
             max_tokens=1000,
             temperature=0.3,
         )
-        
-        # Clean response
+
         response_text = response.text.strip()
         if response_text.startswith("```json"):
             response_text = response_text[7:]
@@ -120,30 +137,16 @@ Return ONLY the JSON array of objects, no other text."""
         if response_text.endswith("```"):
             response_text = response_text[:-3]
         response_text = response_text.strip()
-        
+
         enriched_data = json.loads(response_text)
-        
-        # Ensure we always return a list
         if isinstance(enriched_data, dict):
             enriched_data = [enriched_data]
-
         return enriched_data
-        
+
     except Exception as e:
-        print(f"Error enriching internships: {e}")
-        # Return default values for all internships
-        return [
-            {
-                "skills": ["Python", "Software Development"],
-                "degree": "Bachelor's degree in Computer Science or related field",
-                "field": ["Computer Science", "Software Engineering"],
-                "experience": ["Programming experience"],
-                "summary": f"Software engineering internship at {internship['company']} working on technical projects.",
-                "country": "united-states",
-                "city": "remote"
-            }
-            for internship in internships
-        ]
+        print(f"Error enriching internships with Cohere: {e} — using fast heuristic fallback")
+        return [fast_heuristic_enrichment(item) for item in internships]
+
 
 def main():
     # Initialize Cohere
