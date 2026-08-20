@@ -445,6 +445,19 @@ def process_records(
     else:
         log.info("Skipping AnomalyModel (need ≥2 records); anomaly scores = 0.0")
 
+    # ── Supervised model (if trained artifact is present) ─────────────────
+    from scam_detector.scoring.supervised_model import SupervisedScamModel
+    supervised_scores: list[float | None] = [None] * n
+    sup_model = SupervisedScamModel(config=cfg)
+    if sup_model.load():
+        try:
+            sup_probas = sup_model.predict_proba(matrix)
+            if len(sup_probas) == n:
+                supervised_scores = [float(p) for p in sup_probas]
+                log.info("SupervisedScamModel evaluated on %d records", n)
+        except Exception as exc:
+            log.warning("SupervisedScamModel failed (%s) — supervised scores default to None", exc)
+
     # ── Prompts 6 + 8: rules + risk engine ────────────────────────────────
     rules_engine = RulesEngine(config=cfg)
     risk_engine = RiskEngine(config=cfg)
@@ -466,8 +479,10 @@ def process_records(
             rule_result=rule_result,
             anomaly_score=anomaly_scores[i],
             confidence_score=confidence,
+            supervised_score=supervised_scores[i],
             feature_contributions=anomaly_explanations[i],
         )
+
 
         out = dict(raw)
         out["scam_score"] = result.scam_score

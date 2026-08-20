@@ -28,20 +28,15 @@ class ScoringWeights(BaseModel):
 
 class BlendWeights(BaseModel):
     """
-    Weights for blending rules-engine score with anomaly-model score.
+    Weights for blending rules-engine score with anomaly-model score and optional supervised model.
 
-    Default: 60% rules / 40% anomaly.
-
-    Rationale: rules are more precise early on because they are grounded in
-    Phase 1's actual corpus findings.  The anomaly-model weight should
-    increase over time as more data accumulates and the IsolationForest
-    (or a future supervised model) becomes better calibrated — tune
-    ``anomaly_weight`` upward (and ``rules_weight`` downward) without
-    touching scoring code.
+    Default: 60% rules / 40% anomaly. When supervised model is active, weights are normalized.
     """
 
     rules_weight: float = Field(default=0.60, ge=0.0, le=1.0)
     anomaly_weight: float = Field(default=0.40, ge=0.0, le=1.0)
+    supervised_weight: float = Field(default=0.40, ge=0.0, le=1.0)
+
 
 
 class RuleWeights(BaseModel):
@@ -174,6 +169,20 @@ class EmbeddingConfig(BaseModel):
     )
 
 
+class SupervisedModelConfig(BaseModel):
+    """Configuration for supervised scam classifier."""
+
+    model_path: str = Field(
+        default="scam_detector/models/supervised_model.joblib",
+        description="Path to serialized supervised model artifact",
+    )
+    min_training_samples: int = Field(
+        default=500,
+        ge=1,
+        description="Minimum labeled records required to train supervised model",
+    )
+
+
 class Config(BaseModel):
     """Top-level config object — instantiate once and share."""
 
@@ -185,6 +194,7 @@ class Config(BaseModel):
     decision_thresholds: DecisionThresholds = Field(default_factory=DecisionThresholds)
     confidence: ConfidenceConfig = Field(default_factory=ConfidenceConfig)
     embeddings: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
+    supervised: SupervisedModelConfig = Field(default_factory=SupervisedModelConfig)
     flags: FeatureFlags = Field(default_factory=FeatureFlags)
 
     # When Prompt 6 rule 1 (hard_disqualifying_signals) fires, force this
@@ -195,3 +205,4 @@ class Config(BaseModel):
 
 # Module-level singleton — override fields as needed in tests or via env vars.
 cfg = Config()
+

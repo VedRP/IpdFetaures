@@ -221,6 +221,7 @@ class RiskEngine:
         anomaly_score: float,
         confidence_score: float,
         *,
+        supervised_score: float | None = None,
         feature_contributions: list[tuple[str, float]] | None = None,
     ) -> ScamScoreResult:
         """
@@ -237,6 +238,8 @@ class RiskEngine:
             Unsupervised anomaly score in ``[0, 1]`` from Prompt 7.
         confidence_score:
             Pre-computed confidence in ``[0, 1]`` (see ``compute_confidence_score``).
+        supervised_score:
+            Optional supervised scam probability in ``[0, 1]``.
         feature_contributions:
             Optional anomaly ``explain()`` pairs ``(feature, magnitude)`` for
             the reviewer report / ``top_contributing_features``.
@@ -250,13 +253,24 @@ class RiskEngine:
 
         rw = cfg.blend_weights.rules_weight
         aw = cfg.blend_weights.anomaly_weight
-        total_w = rw + aw
-        if total_w <= 0:
-            rw, aw, total_w = 0.60, 0.40, 1.0
-        rw, aw = rw / total_w, aw / total_w
+        sw = getattr(cfg.blend_weights, "supervised_weight", 0.40)
 
-        blended_01 = rw * rules_score + aw * anomaly
+        if supervised_score is not None and cfg.flags.enable_ml_risk_engine:
+            sup = float(max(0.0, min(1.0, supervised_score)))
+            total_w = rw + aw + sw
+            if total_w <= 0:
+                rw, aw, sw, total_w = 0.40, 0.20, 0.40, 1.0
+            rw, aw, sw = rw / total_w, aw / total_w, sw / total_w
+            blended_01 = rw * rules_score + aw * anomaly + sw * sup
+        else:
+            total_w = rw + aw
+            if total_w <= 0:
+                rw, aw, total_w = 0.60, 0.40, 1.0
+            rw, aw = rw / total_w, aw / total_w
+            blended_01 = rw * rules_score + aw * anomaly
+
         scam_score = round(blended_01 * 100.0, 2)
+
 
         triggered = list(rule_result.triggered)
         triggered_ids = list(rule_result.triggered_rule_ids) or [
