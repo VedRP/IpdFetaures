@@ -65,6 +65,7 @@ class TextFeatures(BaseModel):
     urgency_score: float = Field(default=0.0, ge=0.0, le=1.0)
     vagueness_score: float = Field(default=0.0, ge=0.0, le=1.0)
     embedding_scam_similarity: float = Field(default=0.0, ge=0.0, le=1.0)
+    scam_corpus_similarity: float = Field(default=0.0, ge=0.0, le=1.0)
     word_count: int = Field(default=0, ge=0)
 
 
@@ -102,6 +103,8 @@ class TextFeatureVector(BaseModel):
 
     # 7. Boilerplate / near-duplicate similarity
     boilerplate_similarity: float = Field(default=0.0, ge=0.0, le=1.0)
+    scam_corpus_similarity: float = Field(default=0.0, ge=0.0, le=1.0)
+
 
     # Pass-through remediation flags — affect score discounting
     summary_truncated: bool = Field(default=False)
@@ -529,10 +532,89 @@ def boilerplate_similarity(
 
 
 # ---------------------------------------------------------------------------
+# 8. scam_corpus_similarity
+# ---------------------------------------------------------------------------
+
+def scam_corpus_similarity(
+    text: str,
+    scam_embeddings: np.ndarray | list[list[float]] | None,
+) -> float:
+    """
+    Max cosine similarity of *text* against a maintained set of confirmed-scam embeddings.
+
+    Parameters
+    ----------
+    text:
+        The posting text to embed and compare.
+    scam_embeddings:
+        2-D array of shape ``(M, embedding_dim)`` containing L2-normalised
+        embeddings of confirmed scam postings from FeedbackStore.
+
+    Returns
+    -------
+    float in [0, 1]
+    """
+    if scam_embeddings is None or not text or not text.strip():
+        return 0.0
+
+    model = _sbert_model()
+    if model is None:
+        return 0.0
+
+    try:
+        scam_arr = np.array(scam_embeddings, dtype=np.float32)
+        if scam_arr.size == 0 or len(scam_arr.shape) != 2:
+            return 0.0
+        emb = model.encode([text.strip()], normalize_embeddings=True)
+        sims = scam_arr @ emb[0]
+        return round(float(np.clip(float(sims.max()), 0.0, 1.0)), 4)
+    except Exception:
+        return 0.0
+
+
+def get_scam_corpus_embeddings(
+    feedback_store: Any | None = None,
+    all_records: list[dict[str, Any]] | None = None,
+) -> np.ndarray | None:
+    """
+    Build and return L2-normalised SBERT embeddings matrix of confirmed scam records
+    pulled from FeedbackStore.
+    """
+    if feedback_store is None or all_records is None:
+        return None
+
+    try:
+        history = feedback_store.load_feedback_history()
+        scam_ids = {fb.record_id for fb in history if fb.reviewer_decision == "confirmed_scam"}
+        if not scam_ids:
+            return None
+
+        from scam_detector.features.duplicate_detection import _record_id, _record_text
+        scam_texts = [
+            _record_text(r)
+            for i, r in enumerate(all_records)
+            if _record_id(r, i) in scam_ids
+        ]
+        if not scam_texts:
+            return None
+
+        model = _sbert_model()
+        if model is None:
+            return None
+
+        return model.encode(scam_texts, normalize_embeddings=True, show_progress_bar=False).astype(np.float32)
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Top-level extractor
 # ---------------------------------------------------------------------------
 
-def extract_text_features(record: dict[str, Any]) -> TextFeatureVector:
+def extract_text_features(
+    record: dict[str, Any],
+    scam_embeddings: np.ndarray | list[list[float]] | None = None,
+) -> TextFeatureVector:
     """
     Extract all text features from a remediated internship record.
 
@@ -551,11 +633,8 @@ def extract_text_features(record: dict[str, Any]) -> TextFeatureVector:
         Internship document with keys: name, summary, responsibilities,
         and optionally the remediation flags dict (passed separately or
         embedded as ``_flags``).
-
-    Notes
-    -----
-    ``boilerplate_similarity`` is left at its default (0.0) here — the corpus
-    embedding cache is injected by the duplicate-detection stage.
+    scam_embeddings:
+        Optional precomputed embedding matrix of confirmed scam records from FeedbackStore.
     """
     title: str = record.get("name") or ""
     summary: str = record.get("summary") or ""
@@ -593,6 +672,9 @@ def extract_text_features(record: dict[str, Any]) -> TextFeatureVector:
     # 6. Sensitive info request (summary + responsibilities only)
     sensitive = sensitive_info_request_detector(body_text)
 
+    # 7. Scam corpus similarity
+    scam_sim = scam_corpus_similarity(full_text, scam_embeddings)
+
     word_count = len(full_text.split()) if full_text.strip() else 0
     char_count = len(full_text)
 
@@ -608,8 +690,10 @@ def extract_text_features(record: dict[str, Any]) -> TextFeatureVector:
         artifact_count=int(rg["artifact_count"]),
         sensitive_info_requested=sensitive,
         boilerplate_similarity=0.0,   # injected by duplicate-detection stage
+        scam_corpus_similarity=scam_sim,
         summary_truncated=summary_truncated,
         responsibilities_cleaned=responsibilities_cleaned,
         word_count=word_count,
         char_count=char_count,
     )
+

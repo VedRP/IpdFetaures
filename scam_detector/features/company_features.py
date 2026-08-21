@@ -24,9 +24,13 @@ from __future__ import annotations
 
 import math
 import re
+import sqlite3
+import time
 from collections import defaultdict
-from datetime import date, datetime
+from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Any
+
 
 from pydantic import BaseModel, Field
 
@@ -63,6 +67,11 @@ class CompanyFeatures(BaseModel):
         le=1.0,
         description="Normalised edit distance to nearest known brand (0 = exact match)",
     )
+    domain_age_days: int | None = Field(
+        default=None,
+        description="Age of domain in days from WHOIS creation date (None if lookup fails or missing)",
+    )
+
 
 
 # ---------------------------------------------------------------------------
@@ -368,6 +377,97 @@ def typosquat_brand_distance(
 
 
 # ---------------------------------------------------------------------------
+# Function 5 — fetch_domain_age_days
+# ---------------------------------------------------------------------------
+
+_WHOIS_CACHE_DB_PATH = Path(__file__).parent / "whois_cache.sqlite"
+
+
+def fetch_domain_age_days(
+    domain: str,
+    cache_db_path: str | Path | None = None,
+    ttl_days: int = 30,
+) -> int | None:
+    """
+    Fetch WHOIS domain creation date and compute domain age in days.
+    Uses an SQLite local cache with TTL (default 30 days).
+
+    Lookup failures (socket error, domain missing, no python-whois installed)
+    are treated as missing data (returns None, NOT 0).
+    """
+    if not domain or not domain.strip():
+        return None
+
+    clean_domain = domain.strip().lower()
+    clean_domain = re.sub(r"^https?://", "", clean_domain).split("/")[0].split(":")[0]
+    if not clean_domain:
+        return None
+
+    db_path = Path(cache_db_path) if cache_db_path else _WHOIS_CACHE_DB_PATH
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    now = time.time()
+    ttl_seconds = ttl_days * 86400
+
+    # Query SQLite Cache
+    try:
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS whois_cache (
+                domain TEXT PRIMARY KEY,
+                age_days INTEGER,
+                fetched_at REAL
+            )
+            """
+        )
+        cursor = conn.execute(
+            "SELECT age_days, fetched_at FROM whois_cache WHERE domain = ?",
+            (clean_domain,),
+        )
+        row = cursor.fetchone()
+        if row is not None:
+            cached_age, fetched_at = row
+            conn.close()
+            if now - fetched_at < ttl_seconds:
+                return cached_age
+    except Exception:
+        conn = None
+
+    # Perform WHOIS Lookup
+    age_days: int | None = None
+    try:
+        import whois  # type: ignore
+        w = whois.whois(clean_domain)
+        creation_date = w.creation_date
+        if isinstance(creation_date, list):
+            creation_date = creation_date[0]
+        if isinstance(creation_date, (datetime, date)):
+            c_date = creation_date.date() if isinstance(creation_date, datetime) else creation_date
+            today = datetime.now(timezone.utc).date()
+            if c_date <= today:
+                age_days = (today - c_date).days
+    except Exception:
+        age_days = None  # Lookup failure treated as missing data
+
+    # Store Result in Cache
+    try:
+        if conn is None:
+            conn = sqlite3.connect(str(db_path))
+        with conn:
+            conn.execute(
+                "REPLACE INTO whois_cache (domain, age_days, fetched_at) VALUES (?, ?, ?)",
+                (clean_domain, age_days, now),
+            )
+        conn.close()
+    except Exception:
+        pass
+
+    return age_days
+
+
+
+# ---------------------------------------------------------------------------
 # Combined output model & top-level extractor
 # ---------------------------------------------------------------------------
 # Import here (bottom of file) to avoid circular imports between sibling
@@ -423,6 +523,11 @@ def extract_company_url_features(
     company: str = record.get("company") or ""
     apply_link: str = record.get("applyLink") or record.get("apply_link") or ""
 
+    # ── URL features ──────────────────────────────────────────────────────
+    components = parse_url_components(apply_link)
+    tld = components["tld"]
+    registered_dom = components["registered_domain"] or components["domain"]
+
     # ── Company features ──────────────────────────────────────────────────
     suspect = is_company_suspect(effective_flags)
 
@@ -432,6 +537,7 @@ def extract_company_url_features(
     else:
         freq = company_posting_frequency(company, batch)
         typo_dist = typosquat_brand_distance(company)
+        domain_age = fetch_domain_age_days(registered_dom) if registered_dom else None
         company_feats = CompanyFeatures(
             is_suspect=False,
             has_legal_suffix=has_legal_suffix(company),
@@ -439,11 +545,8 @@ def extract_company_url_features(
             posting_date_span_days=freq["date_span_days"],
             role_diversity_score=freq["role_diversity_score"],
             typosquat_min_distance=typo_dist,
+            domain_age_days=domain_age,
         )
-
-    # ── URL features ──────────────────────────────────────────────────────
-    components = parse_url_components(apply_link)
-    tld = components["tld"]
 
     url_feats = UrlFeatures(
         domain=components["domain"],
@@ -462,3 +565,4 @@ def extract_company_url_features(
     )
 
     return CompanyUrlFeatureVector(company=company_feats, url=url_feats)
+

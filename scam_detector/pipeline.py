@@ -161,25 +161,41 @@ def build_peer_group(
     min_jaccard: float = _PEER_JACCARD_MIN,
 ) -> list[dict[str, Any]]:
     """
-    Peer group for stipend / openings z-scores: same ``isRemote`` plus
-    field/tags Jaccard overlap.  Includes *record* itself when present in
-    ``all_records`` so σ estimates use the full category cohort.
+    Peer group for stipend / openings z-scores conditioned on
+    (role_category, city_tier, company_size_tier).
     """
-    own_labels = _as_str_set(record.get("field")) | _as_str_set(record.get("tags"))
-    own_remote = bool(record.get("isRemote"))
-    peers: list[dict[str, Any]] = []
-    for other in all_records:
-        if bool(other.get("isRemote")) != own_remote:
-            continue
-        other_labels = _as_str_set(other.get("field")) | _as_str_set(other.get("tags"))
-        if not own_labels or not other_labels:
-            # Fall back to same-remote cohort when labels are missing so tiny
-            # fixtures still get a usable peer set.
-            peers.append(other)
-            continue
-        if _jaccard(own_labels, other_labels) >= min_jaccard:
-            peers.append(other)
+    from scam_detector.features.stipend_features import (
+        get_role_category,
+        get_city_tier,
+        get_company_size_tier,
+    )
+
+    target_role = get_role_category(record)
+    target_city = get_city_tier(record)
+    target_size = get_company_size_tier(record)
+
+    peers = [
+        r for r in all_records
+        if get_role_category(r) == target_role
+        and get_city_tier(r) == target_city
+        and get_company_size_tier(r) == target_size
+    ]
+
+    if len(peers) < 2:
+        peers = [
+            r for r in all_records
+            if get_role_category(r) == target_role
+            and get_city_tier(r) == target_city
+        ]
+
+    if len(peers) < 2:
+        peers = [
+            r for r in all_records
+            if get_role_category(r) == target_role
+        ]
+
     return peers if peers else list(all_records)
+
 
 
 def _index_by_company(
@@ -259,13 +275,14 @@ def _enrich_feature_vector(
     all_records: list[dict[str, Any]],
     peer_group: list[dict[str, Any]],
     company_records: list[dict[str, Any]],
+    scam_embeddings: Any | None = None,
 ) -> FeatureVector:
     """Per-record feature extraction using pre-built corpus structures."""
     raw = remediated.record
     flags = remediated.flags
     raw_with_flags = {**raw, "_flags": flags}
 
-    text = extract_text_features(raw_with_flags)
+    text = extract_text_features(raw_with_flags, scam_embeddings=scam_embeddings)
     cu = extract_company_url_features(
         raw_with_flags, all_records=all_records, flags=flags
     )
@@ -296,10 +313,16 @@ def _enrich_feature_vector(
     )
 
     burst = posting_burst_score(raw, company_records)
+    from scam_detector.features.temporal_features import recruiter_posting_velocity
+    v24 = recruiter_posting_velocity(raw, all_records, hours=24)
+    v72 = recruiter_posting_velocity(raw, all_records, hours=72)
+
     temporal = TemporalFeatures(
         posting_burst_count=int(burst.get("burst_count") or 0),
         posting_burst_cadence=burst.get("cadence_days"),
         deadline_urgency_score=deadline_urgency_score(raw),
+        recruiter_posting_velocity_24h=v24,
+        recruiter_posting_velocity_72h=v72,
     )
 
     completeness = field_completeness_score(raw)
@@ -326,6 +349,7 @@ def _enrich_feature_vector(
         temporal=temporal,
         structural=structural,
     )
+
 
 
 def feature_vector_to_rule_input(
@@ -404,6 +428,14 @@ def process_records(
     ]
 
     # ── Per-record features (Prompts 2–5) ─────────────────────────────────
+    from scam_detector.features.text_features import get_scam_corpus_embeddings
+    from scam_detector.feedback import FeedbackStore
+    try:
+        feedback_store = FeedbackStore("scam_detector/feedback.jsonl")
+        scam_embeddings = get_scam_corpus_embeddings(feedback_store, records)
+    except Exception:
+        scam_embeddings = None
+
     feature_vectors: list[FeatureVector] = []
     cross_company_flags: list[bool] = []
 
@@ -418,8 +450,10 @@ def process_records(
             all_records=records,
             peer_group=peer_cache[i],
             company_records=company_recs,
+            scam_embeddings=scam_embeddings,
         )
         feature_vectors.append(fv)
+
 
         dup_neighbors = neighbors_by_id.get(rid, [])
         cross_company_flags.append(

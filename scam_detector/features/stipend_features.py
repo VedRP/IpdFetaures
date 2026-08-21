@@ -96,6 +96,76 @@ _ZSCORE_LOW = -2.0   # more than 2 SD below mean   → suspiciously low
 
 
 # ---------------------------------------------------------------------------
+# Category Extraction Helpers for Peer Grouping
+# ---------------------------------------------------------------------------
+
+
+def _as_str_set(value: Any) -> set[str]:
+    if not value:
+        return set()
+    if isinstance(value, str):
+        return {value.strip().lower()} if value.strip() else set()
+    if isinstance(value, list):
+        return {str(v).strip().lower() for v in value if v and str(v).strip()}
+    return set()
+
+
+def get_role_category(record: dict[str, Any]) -> str:
+    """Derive role_category from explicit field or token matching on title/field/tags."""
+    if cat := record.get("role_category"):
+        return str(cat).strip().lower()
+    field_tokens = _as_str_set(record.get("field")) | _as_str_set(record.get("tags"))
+    title = str(record.get("name") or record.get("title") or "").lower()
+    if any(k in title or any(k in f for f in field_tokens) for k in ["tech", "software", "backend", "frontend", "developer", "data", "python"]):
+        return "tech"
+    if any(k in title or any(k in f for f in field_tokens) for k in ["marketing", "sales", "business development", "social media", "seo"]):
+        return "marketing_sales"
+    if any(k in title or any(k in f for f in field_tokens) for k in ["design", "graphic", "ui", "ux", "video"]):
+        return "design"
+    if any(k in title or any(k in f for f in field_tokens) for k in ["finance", "accounting", "hr", "operations"]):
+        return "finance_ops"
+    return "general"
+
+
+def get_city_tier(record: dict[str, Any]) -> str:
+    """Derive city_tier from explicit field, isRemote, or location/city."""
+    if tier := record.get("city_tier"):
+        return str(tier).strip().lower()
+    if record.get("isRemote"):
+        return "remote"
+    loc = str(record.get("location") or record.get("city") or "").lower()
+    tier1 = {"mumbai", "delhi", "bengaluru", "bangalore", "hyderabad", "chennai", "kolkata", "pune", "ahmedabad"}
+    if any(city in loc for city in tier1):
+        return "tier_1"
+    if loc:
+        return "tier_2"
+    return "unknown"
+
+
+def get_company_size_tier(record: dict[str, Any]) -> str:
+    """Derive company_size_tier from explicit field or company_size / employees."""
+    if tier := record.get("company_size_tier"):
+        return str(tier).strip().lower()
+    size = record.get("company_size") or record.get("employees")
+    if isinstance(size, (int, float)):
+        if size < 50:
+            return "startup"
+        if size < 500:
+            return "midsize"
+        return "enterprise"
+    if isinstance(size, str):
+        size_lc = size.lower()
+        if any(k in size_lc for k in ["1-10", "11-50", "startup", "small"]):
+            return "startup"
+        if any(k in size_lc for k in ["51-200", "201-500", "mid"]):
+            return "midsize"
+        if any(k in size_lc for k in ["500+", "1000", "large", "enterprise"]):
+            return "enterprise"
+    return "unknown"
+
+
+
+# ---------------------------------------------------------------------------
 # Function 1 — normalize_stipend_to_hourly_inr
 # ---------------------------------------------------------------------------
 

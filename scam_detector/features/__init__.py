@@ -107,36 +107,34 @@ def extract_all(
     hourly = normalize_stipend_to_hourly_inr(raw.get("stipend") or {}, raw.get("duration") or {})
     
     # Peer group logic for z-scores
-    def _as_str_set(value: Any) -> set[str]:
-        if not value:
-            return set()
-        if isinstance(value, str):
-            return {value.strip().lower()} if value.strip() else set()
-        if isinstance(value, list):
-            return {str(v).strip().lower() for v in value if v and str(v).strip()}
-        return set()
-
-    def _jaccard(a: set[str], b: set[str]) -> float:
-        if not a and not b:
-            return 0.0
-        union = a | b
-        if not union:
-            return 0.0
-        return len(a & b) / len(union)
+    from scam_detector.features.stipend_features import (
+        get_role_category,
+        get_city_tier,
+        get_company_size_tier,
+    )
 
     def _build_peer_group(rec: dict[str, Any], corpus: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        own_labels = _as_str_set(rec.get("field")) | _as_str_set(rec.get("tags"))
-        own_remote = bool(rec.get("isRemote"))
-        peers: list[dict[str, Any]] = []
-        for other in corpus:
-            if bool(other.get("isRemote")) != own_remote:
-                continue
-            other_labels = _as_str_set(other.get("field")) | _as_str_set(other.get("tags"))
-            if not own_labels or not other_labels:
-                peers.append(other)
-                continue
-            if _jaccard(own_labels, other_labels) >= 0.20:
-                peers.append(other)
+        target_role = get_role_category(rec)
+        target_city = get_city_tier(rec)
+        target_size = get_company_size_tier(rec)
+
+        peers = [
+            r for r in corpus
+            if get_role_category(r) == target_role
+            and get_city_tier(r) == target_city
+            and get_company_size_tier(r) == target_size
+        ]
+        if len(peers) < 2:
+            peers = [
+                r for r in corpus
+                if get_role_category(r) == target_role
+                and get_city_tier(r) == target_city
+            ]
+        if len(peers) < 2:
+            peers = [
+                r for r in corpus
+                if get_role_category(r) == target_role
+            ]
         return peers if peers else list(corpus)
 
     peer_group = _build_peer_group(raw, batch)
@@ -169,11 +167,17 @@ def extract_all(
     ] if company_key else [raw]
     
     burst = posting_burst_score(raw, company_recs)
+    from scam_detector.features.temporal_features import recruiter_posting_velocity
+    v24 = recruiter_posting_velocity(raw, batch, hours=24)
+    v72 = recruiter_posting_velocity(raw, batch, hours=72)
     temporal = TemporalFeatures(
         posting_burst_count=int(burst.get("burst_count") or 0),
         posting_burst_cadence=burst.get("cadence_days"),
         deadline_urgency_score=deadline_urgency_score(raw),
+        recruiter_posting_velocity_24h=v24,
+        recruiter_posting_velocity_72h=v72,
     )
+
 
     # Structural
     completeness = field_completeness_score(raw)
