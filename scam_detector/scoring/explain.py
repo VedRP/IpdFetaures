@@ -79,6 +79,7 @@ class ScamScoreResult(BaseModel):
     triggered_rule_findings: list[RuleFinding] = Field(default_factory=list)
     rules_score: float = Field(default=0.0, ge=0.0, le=1.0)
     anomaly_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    supervised_score: float | None = Field(default=None, ge=0.0, le=1.0)
     hard_disqualifying_forced: bool = Field(
         default=False,
         description="True when decision was forced by hard-disqualifying rule policy",

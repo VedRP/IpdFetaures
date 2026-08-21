@@ -227,3 +227,69 @@ class TestBlendAndThresholds:
         assert result.scam_score >= 70.0
         assert result.decision == "block"
         assert result.hard_disqualifying_forced is False
+
+
+class TestSupervisedBlendingAndCalibration:
+    def test_supervised_score_blending_when_enabled(self) -> None:
+        cfg = Config(
+            blend_weights=BlendWeights(
+                rules_weight=0.50,
+                anomaly_weight=0.25,
+                supervised_weight=0.25,
+            )
+        )
+        engine = RiskEngine(cfg)
+        rules = _rules(_finding("typosquat_domain", weight=0.60))
+
+        # rules_score = 0.60, anomaly = 0.20, supervised = 0.80
+        # Blend = 0.50*0.60 + 0.25*0.20 + 0.25*0.80 = 0.30 + 0.05 + 0.20 = 0.55
+        result = engine.score_record(
+            record={},
+            rule_result=rules,
+            anomaly_score=0.20,
+            confidence_score=0.90,
+            supervised_score=0.80,
+        )
+        assert result.supervised_score == 0.80
+        assert abs(result.scam_score - 55.0) < 1.0
+
+    def test_supervised_score_ignored_when_weight_zero(self) -> None:
+        cfg = Config(
+            blend_weights=BlendWeights(
+                rules_weight=0.60,
+                anomaly_weight=0.40,
+                supervised_weight=0.0,
+            )
+        )
+        engine = RiskEngine(cfg)
+        rules = _rules(_finding("typosquat_domain", weight=0.50))
+
+        # rules_score = 0.50, anomaly = 0.50 -> blended = 0.50 -> 50.0
+        result = engine.score_record(
+            record={},
+            rule_result=rules,
+            anomaly_score=0.50,
+            confidence_score=0.90,
+            supervised_score=0.99,  # Provided but weight is 0.0
+        )
+        assert result.supervised_score is None
+        assert abs(result.scam_score - 50.0) < 1.0
+
+    def test_calibrator_integration(self, tmp_path) -> None:
+        from scam_detector.scoring.calibration import ScoreCalibrator
+
+        raw_scores = [0.1 * i for i in range(10)] * 5
+        labels = [0 if s < 0.5 else 1 for s in raw_scores]
+        calibrator = ScoreCalibrator(min_samples=10).fit(raw_scores, labels)
+
+        engine = RiskEngine(calibrator=calibrator)
+        rules = _rules()
+
+        result = engine.score_record(
+            record={},
+            rule_result=rules,
+            anomaly_score=0.20,
+            confidence_score=0.90,
+        )
+        assert 0.0 <= result.scam_score <= 100.0
+

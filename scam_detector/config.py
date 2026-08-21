@@ -30,12 +30,13 @@ class BlendWeights(BaseModel):
     """
     Weights for blending rules-engine score with anomaly-model score and optional supervised model.
 
-    Default: 60% rules / 40% anomaly. When supervised model is active, weights are normalized.
+    Default: 60% rules / 40% anomaly / 0% supervised. When supervised model is active, weights are normalized.
     """
 
     rules_weight: float = Field(default=0.60, ge=0.0, le=1.0)
     anomaly_weight: float = Field(default=0.40, ge=0.0, le=1.0)
-    supervised_weight: float = Field(default=0.40, ge=0.0, le=1.0)
+    supervised_weight: float = Field(default=0.0, ge=0.0, le=1.0)
+
 
 
 
@@ -183,6 +184,20 @@ class SupervisedModelConfig(BaseModel):
     )
 
 
+class CalibrationConfig(BaseModel):
+    """Configuration for isotonic score calibrator."""
+
+    model_path: str = Field(
+        default="scam_detector/models/calibration_model.joblib",
+        description="Path to serialized calibration model artifact",
+    )
+    min_calibration_samples: int = Field(
+        default=50,
+        ge=1,
+        description="Minimum labeled records required to fit calibration model",
+    )
+
+
 class Config(BaseModel):
     """Top-level config object — instantiate once and share."""
 
@@ -195,6 +210,7 @@ class Config(BaseModel):
     confidence: ConfidenceConfig = Field(default_factory=ConfidenceConfig)
     embeddings: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     supervised: SupervisedModelConfig = Field(default_factory=SupervisedModelConfig)
+    calibration: CalibrationConfig = Field(default_factory=CalibrationConfig)
     flags: FeatureFlags = Field(default_factory=FeatureFlags)
 
     # When Prompt 6 rule 1 (hard_disqualifying_signals) fires, force this

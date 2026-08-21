@@ -203,16 +203,19 @@ def _build_explanation_summary(
 
 class RiskEngine:
     """
-    Blend rules + anomaly scores into a final ScamScoreResult.
+    Blend rules + anomaly + supervised scores into a final ScamScoreResult.
 
     Parameters
     ----------
     config:
         Optional config override (weights, thresholds, hard-DQ policy).
+    calibrator:
+        Optional ScoreCalibrator instance (or None to load automatically from config).
     """
 
-    def __init__(self, config: Config | None = None) -> None:
+    def __init__(self, config: Config | None = None, calibrator: Any | None = None) -> None:
         self._cfg = config or _default_cfg
+        self._calibrator = calibrator
 
     def score_record(
         self,
@@ -253,24 +256,36 @@ class RiskEngine:
 
         rw = cfg.blend_weights.rules_weight
         aw = cfg.blend_weights.anomaly_weight
-        sw = getattr(cfg.blend_weights, "supervised_weight", 0.40)
+        sw = getattr(cfg.blend_weights, "supervised_weight", 0.0)
 
-        if supervised_score is not None and cfg.flags.enable_ml_risk_engine:
+        use_supervised = supervised_score is not None and (
+            sw > 0.0 or cfg.flags.enable_ml_risk_engine
+        )
+
+        if use_supervised and supervised_score is not None:
             sup = float(max(0.0, min(1.0, supervised_score)))
-            total_w = rw + aw + sw
+            effective_sw = sw if sw > 0.0 else 0.40
+            total_w = rw + aw + effective_sw
             if total_w <= 0:
-                rw, aw, sw, total_w = 0.40, 0.20, 0.40, 1.0
-            rw, aw, sw = rw / total_w, aw / total_w, sw / total_w
-            blended_01 = rw * rules_score + aw * anomaly + sw * sup
+                rw, aw, effective_sw, total_w = 0.40, 0.20, 0.40, 1.0
+            rw_norm, aw_norm, sw_norm = rw / total_w, aw / total_w, effective_sw / total_w
+            blended_01 = rw_norm * rules_score + aw_norm * anomaly + sw_norm * sup
         else:
             total_w = rw + aw
             if total_w <= 0:
                 rw, aw, total_w = 0.60, 0.40, 1.0
-            rw, aw = rw / total_w, aw / total_w
-            blended_01 = rw * rules_score + aw * anomaly
+            rw_norm, aw_norm = rw / total_w, aw / total_w
+            blended_01 = rw_norm * rules_score + aw_norm * anomaly
 
-        scam_score = round(blended_01 * 100.0, 2)
+        # Calibrate score mapping (falls back to raw blended_01 if no calibration model exists)
+        if self._calibrator is not None:
+            calibrated_01 = self._calibrator.calibrate(blended_01)
+        else:
+            from scam_detector.scoring.calibration import ScoreCalibrator
+            calibrator = ScoreCalibrator(config=cfg)
+            calibrated_01 = calibrator.calibrate(blended_01)
 
+        scam_score = round(calibrated_01 * 100.0, 2)
 
         triggered = list(rule_result.triggered)
         triggered_ids = list(rule_result.triggered_rule_ids) or [
@@ -333,6 +348,7 @@ class RiskEngine:
             triggered_rule_findings=list(triggered),
             rules_score=rules_score,
             anomaly_score=anomaly,
+            supervised_score=supervised_score if use_supervised else None,
             hard_disqualifying_forced=hard_forced,
             low_confidence_forced_review=low_conf_forced,
         )
