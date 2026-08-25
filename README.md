@@ -1,74 +1,111 @@
-<<<<<<< HEAD
----
-title: iFind Scraper API
-emoji: 🔍
-colorFrom: blue
-colorTo: indigo
-sdk: docker
-app_port: 7860
-pinned: false
+# iFind Platform & Scraper / Scam Detector Engine
+
+Comprehensive backend services and ML pipelines powering **iFind**: internship scraping, data quality remediation, multi-stage scam detection, and AI resume extraction.
+
 ---
 
-# iFind Scraper API
+## 🏗 System Architecture & Services
 
-FastAPI service that runs internship scrapers and pushes results through the
-moderation pipeline into MongoDB.
+```
+                                  iFind Ecosystem
+                                         │
+        ┌────────────────────────────────┼────────────────────────────────┐
+        ▼                                ▼                                ▼
+ 🌐 Scraper Service             🛡 Scam Detector              📄 Resume Extractor
+  (FastAPI + Selenium)           (Rules + Anomaly ML)          (pdfplumber + spaCy + CRF)
+  - Scrapes 7+ platforms         - Data Quality Remediation    - Layout-aware PDF/DOCX
+  - Normalizes JSON schema       - 7 Deterministic Rules       - NER & Skill Taxonomy
+  - Stores in MongoDB            - IsolationForest & Risk Blend- Auto Project Link Match
+```
 
-## Endpoints
+---
+
+## 🔍 1. iFind Scraper API
+
+FastAPI service that orchestrates background scraping jobs across platforms (`github`, `internshala`, `indeed`, `naukri`, `unstop`, `freshersworld`, `letsintern`) and pushes clean records into MongoDB.
+
+### Scraper Endpoints
 
 | Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/health` | Liveness check |
-| `POST` | `/scrape` | Start a scrape job (returns `job_id` immediately) |
-| `GET` | `/scrape/{job_id}` | Poll job status |
-| `GET` | `/scrape` | List all jobs |
-| `GET` | `/docs` | Swagger UI |
+|---|---|---|
+| `GET` | `/health` | Liveness and health check |
+| `POST` | `/scrape` | Trigger asynchronous scraping job (returns `job_id`) |
+| `GET` | `/scrape/{job_id}` | Poll job status, progress, and record counts |
+| `GET` | `/scrape` | List all past and active scraping jobs |
+| `GET` | `/docs` | Interactive Swagger API documentation |
 
-## Environment secrets
+---
 
-Set these in the Space **Settings → Secrets** tab:
+## 🛡 2. Scam Detector Pipeline (`scam_detector`)
 
-| Secret | Description |
-|--------|-------------|
-| `MONGODB_URI` | MongoDB Atlas connection string |
-| `COHERE_API_KEY` | Cohere API key (used by GitHub / Indeed / Internshala scrapers for AI enrichment) |
+Multi-stage fraud mitigation and data-quality engine protecting users from fake listings, advance fees, upfront credential harvesting, and shell company recruiters.
 
-## Usage
+### Pipeline Stages
+1. **Data Quality Remediation**: Cleans scraper category leaks, default degree fallbacks, missing deadlines (`data_quality/remediate.py`).
+2. **Corpus Indexing**: Builds SBERT `DuplicateIndex` (or Jaccard fallback), peer groups, and recruiter posting velocity tables.
+3. **Feature Extraction**: Computes Text, Company, URL, Stipend, Temporal, and Structural feature vectors.
+4. **Unsupervised Anomaly Model**: Fits IsolationForest across a 47-column numeric feature matrix (`scoring/anomaly_model.py`).
+5. **Deterministic Rules Engine**: Evaluates 7 business rules combined via Noisy-OR logic ($1 - \prod (1 - w_i)$):
+   - `HardDisqualifyingSignalsRule` (weight: 0.95 — upfront payment / Aadhaar / bank requests)
+   - `CrossCompanyDuplicateRule` (weight: 0.80 — duplicate listings under different companies)
+   - `TyposquatDomainRule` (weight: 0.70 — domain mismatch on off-platform link)
+   - `ExtremeStipendOutlierRule` (weight: 0.45 — $\|z\| > 3.0$ vs peer group)
+   - `MassOpeningsVagueRoleRule` (weight: 0.40 — openings $z > 2.0$ & genericity $> 0.65$)
+   - `StipendPerkContradictionRule` (weight: 0.35 — text vs stipend contradiction)
+   - `UnverifiableCompanyRule` (weight: 0.10 — category leak flag)
+6. **Risk Engine & Calibration**: Blends Rules ($60\%$), Anomaly ($40\%$), and optional Supervised models ($0\%$), applies Isotonic score calibration, computes confidence, and enforces decision thresholds (`clear` $< 30$, `review` $30\text{--}70$, `block` $\ge 70$).
+7. **Human Review Feedback Store**: Append-only JSONL feedback store (`feedback.py`) for reviewer labeling and supervised model retraining.
 
+### CLI & Batch Usage
 ```bash
-# Start all scrapers
-curl -X POST https://<your-space>.hf.space/scrape \
-  -H "Content-Type: application/json" \
-  -d '{"scrapers": ["github", "internshala", "indeed", "naukri", "unstop", "freshersworld", "letsintern"]}'
+# Run tests
+pytest scam_detector/tests/ -v
 
-# Poll for result
-curl https://<your-space>.hf.space/scrape/<job_id>
-```
-=======
-﻿# scam_detector
-
-Internship scam-detection pipeline for iFind.
-
-## Pipeline stages
-
-1. Data quality remediation (`data_quality.remediate_batch`)
-2. Corpus-level structures (duplicate index, peer groups, company frequency)
-3. Feature extraction (text, company, URL, stipend, temporal, structural)
-4. Unsupervised anomaly scoring (`AnomalyModel`)
-5. Deterministic rules engine (`RulesEngine`)
-6. Risk blending (`RiskEngine.score_record`)
-7. Batch CLI (`python -m scam_detector.pipeline`)
-
-Human-review feedback (`feedback.py`) is available but not wired into the main pipeline yet.
-
-## Quick start
-
-```bash
-cd scam_detector
-pip install -e ".[dev]"
-pytest tests/
-python -m scam_detector.pipeline input.json output.json --sample 20
+# Run batch scoring on raw scraped JSON
+python -m scam_detector.pipeline input.json output.json --sample 50
 ```
 
-See `AUDIT_REPORT.md` for implementation status and audit notes.
->>>>>>> 7a99c785c15cfc524d32a9d883ac9d5bcdc31702
+---
+
+## 📄 3. Resume Extractor API (`resume-extract`)
+
+High-precision resume parser converting PDF and DOCX files into structured JSON matching candidate resume schemas.
+
+### Key Features & Technology Stack
+- **Layout-Aware PDF Extraction**: `pdfplumber` with two-column gutter detection.
+- **spaCy NER**: `en_core_web_sm` for Name (PERSON), Organization (ORG), and Location (GPE) extraction.
+- **Skill Taxonomy**: `SkillNer` (ESCO ontology, ~6,000 terms) with `SKILL_FIELDS` categorization fallback.
+- **CRF Sequence Labeller**: Sequence tagging for headers and experience lines (`crf_model.pkl`).
+- **Project Hyperlink Auto-Matching**: Auto-associates GitHub, GitLab, and live demo links with extracted projects.
+- **Publications & Interests**: Structured parsers for publication URLs and interest topics.
+
+### Resume Extractor Endpoints
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/` | Service liveness check |
+| `GET` | `/health` | Model status check (`spacy_ner`, `skillner`, `crf_sequence_labeller`) |
+| `GET` | `/schema` | Returns Resume JSON response schema |
+| `POST` | `/extract` | Upload PDF/DOCX file $\rightarrow$ returns structured Resume JSON |
+
+---
+
+## 📊 4. Dataset Profiling & Research
+
+- **Kaggle Dataset Profile**: [`kaggle_internship_dataset_profile.md`](kaggle_internship_dataset_profile.md) contains full profiling, schema overlap analysis, and data leakage findings for 1,000,000 simulated listings (`aiexplorer77/internship-scam-detection-dataset`).
+
+---
+
+## ⚙️ Environment Variables & Secrets
+
+Set these environment variables or HuggingFace Space Secrets:
+
+| Secret / Env Var | Description |
+|---|---|
+| `MONGODB_URI` | Connection string for MongoDB Atlas database |
+| `COHERE_API_KEY` | API key for Cohere AI enrichment in scrapers |
+
+---
+
+## 📜 License & Provenance
+Developed for **iFind**. All rights reserved.
+
