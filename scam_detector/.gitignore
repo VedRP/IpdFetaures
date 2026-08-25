@@ -22,3 +22,6 @@ build/
 .mypy_cache/
 htmlcov/
 .coverage
+*.sqlite
+whois_cache.sqlite
+
