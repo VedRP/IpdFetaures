@@ -20,6 +20,10 @@ import json
 import time
 import logging
 from typing import Optional
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from format_internship import format_and_save
 from collections import Counter
 
 from selenium import webdriver
@@ -421,20 +425,60 @@ def parse_card(link_el, href: str, driver) -> Optional[dict]:
     skills = extract_skills(full_text)
     role   = classify_role(title, card_text)
 
+    # ── Responsibilities ──────────────────────────────────────────────────
+    responsibilities = []
+    numbered = re.findall(
+        r"(?:^|\n)\s*\d+[\.\)]\s*(.+?)(?=\n\s*\d+[\.\)]|\Z)",
+        card_text, re.DOTALL
+    )
+    for r_item in numbered:
+        r_item = re.sub(r"\s+", " ", r_item).strip()
+        if 10 < len(r_item) < 300:
+            responsibilities.append(r_item)
+    responsibilities = responsibilities[:8]
+
+    # ── Perks ─────────────────────────────────────────────────────────────
+    PERK_PATTERNS_LOCAL = [
+        (r"\bcertificate\b", "Certificate"),
+        (r"\bletter of recommendation\b|\blor\b", "Letter of Recommendation"),
+        (r"\bflexible hours?\b|\bflexible timing\b", "Flexible hours"),
+        (r"\b5\s*days?/?\s*week\b", "5 days/week"),
+        (r"\bwork from home\b|\bwfh\b|\bremote\b", "Work from home"),
+        (r"\bpre-placement\s*offer\b|\bppo\b", "Pre-Placement Offer"),
+        (r"\bmentorship\b", "Mentorship"),
+        (r"\bperformance\s*bonus\b|\bincentive\b", "Performance bonus"),
+    ]
+    perks = []
+    lower_card = card_text.lower()
+    for pattern, perk_name in PERK_PATTERNS_LOCAL:
+        if re.search(pattern, lower_card) and perk_name not in perks:
+            perks.append(perk_name)
+
+    # ── Openings ──────────────────────────────────────────────────────────
+    openings = 1
+    om = re.search(r"(\d+)\s*(?:opening|position|seat|vacanc)s?", card_text, re.IGNORECASE)
+    if om:
+        n = int(om.group(1))
+        if 1 <= n <= 500:
+            openings = n
+
     return {
-        "id":             slug_data["id"],
-        "title":          title,
-        "company":        company,
-        "location":       location,
-        "salary":         parsed["salary"],
-        "experience":     parsed["experience"],
-        "qualifications": parsed["qualifications"],
-        "posted":         parsed["posted"],
-        "is_walkin":      parsed["is_walkin"],
-        "is_hot":         parsed["is_hot"],
-        "skills":         skills,
-        "type":           role,
-        "link":           url,
+        "id":               slug_data["id"],
+        "title":            title,
+        "company":          company,
+        "location":         location,
+        "salary":           parsed["salary"],
+        "experience":       parsed["experience"],
+        "qualifications":   parsed["qualifications"],
+        "posted":           parsed["posted"],
+        "is_walkin":        parsed["is_walkin"],
+        "is_hot":           parsed["is_hot"],
+        "skills":           skills,
+        "type":             role,
+        "link":             url,
+        "responsibilities": responsibilities,
+        "perks":            perks,
+        "openings":         openings,
     }
 
 
@@ -678,10 +722,9 @@ def main():
     # ── Save raw ──────────────────────────────────────────────────────────────
     save_json(all_items, OUTPUT_RAW)
 
-    # ── Dedup + final save ────────────────────────────────────────────────────
+    # ── Dedup ─────────────────────────────────────────────────────────────────
     unique = deduplicate(all_items)
     log.info("After dedup: %d unique internships", len(unique))
-    save_json(unique, OUTPUT_FINAL)
 
     # ── Quality report ────────────────────────────────────────────────────────
     if unique:
@@ -704,8 +747,34 @@ def main():
         hot_count    = sum(1 for i in unique if i.get("is_hot"))
         log.info("Walk-in jobs: %d | Hot jobs: %d", walkin_count, hot_count)
 
-    print(f"\nTotal internships scraped: {len(unique)}")
-    return unique
+    # ── AI enrichment (fills missing skills, summary, responsibilities, etc.) ──
+    try:
+        from freshersworld_scraper.ai_enricher import enrich_batch, GROQ_API_KEY, GEMINI_API_KEY
+        if GROQ_API_KEY or GEMINI_API_KEY:
+            provider = "Groq" if GROQ_API_KEY else "Gemini"
+            log.info("AI enrichment enabled (%s) — enriching %d items...", provider, len(unique))
+            unique = enrich_batch(unique)
+            # Save enriched raw
+            enriched_path = OUTPUT_RAW.replace("_raw.json", "_enriched.json")
+            save_json(unique, enriched_path)
+        else:
+            log.info(
+                "AI enrichment skipped (no API key). "
+                "Set GROQ_API_KEY for free enrichment: https://console.groq.com"
+            )
+    except ImportError:
+        log.info("ai_enricher not available — skipping enrichment")
+
+    # ── Save formatted (standardized MongoDB format) ──────────────────────────
+    formatted = format_and_save(
+        unique,
+        source="freshersworld",
+        output_path=OUTPUT_FINAL,
+    )
+    log.info("Saved %d formatted internships → %s", len(formatted), OUTPUT_FINAL)
+
+    print(f"\nTotal internships scraped: {len(formatted)}")
+    return formatted
 
 
 if __name__ == "__main__":

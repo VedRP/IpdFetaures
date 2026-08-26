@@ -1,9 +1,17 @@
 """
 Naukri.com Internship Scraper
 ==============================
-Scrapes internships from https://www.naukri.com/internship-jobs
+Scrapes internships from https://www.naukri.com/internship/
 
-URL: https://www.naukri.com/{keyword}-internship-jobs[-{page}]
+Strategy:
+  - URL slug is the PRIMARY data source (always available, never empty)
+    e.g. /job-listings-software-developer-siemens-bengaluru-0-to-1-years-090426929138
+    → company: Siemens, location: Bengaluru, experience: 0-1 Yrs
+  - Card text is SECONDARY (enriches with salary, posted date, description)
+  - DOM walking is structure-independent (no class/id assumptions)
+
+Install:
+    pip install selenium webdriver-manager
 """
 
 import re
@@ -36,11 +44,11 @@ log = logging.getLogger("naukri-intern")
 # ── Config ────────────────────────────────────────────────────────────────────
 SEARCH_KEYWORD  = ""        # e.g. "software developer", "marketing", "" for all
 SEARCH_LOCATION = ""        # e.g. "bangalore", "" for all India
-PAGES           = 8         # ~300 internships at ~40/page
+PAGES           = 10        # pages to scrape (~20 internships per page)
 OUTPUT_RAW      = "internships_raw.json"
 OUTPUT_FINAL    = "internships.json"
 
-# ── Skills ────────────────────────────────────────────────────────────────────
+# ── Skills list ───────────────────────────────────────────────────────────────
 SKILLS_LIST = [
     "python", "java", "c++", "javascript", "react", "node", "html", "css",
     "sql", "excel", "machine learning", "data analysis", "figma", "aws",
@@ -61,6 +69,7 @@ ROLE_MAP = {
     "Testing / QA":         ["qa", "quality assurance", "testing", "automation testing"],
 }
 
+# Indian cities as they appear in Naukri URL slugs (lowercase, hyphenated)
 INDIAN_CITIES = [
     "bengaluru", "bangalore", "mumbai", "delhi", "hyderabad", "pune",
     "chennai", "kolkata", "ahmedabad", "noida", "gurgaon", "gurugram",
@@ -83,13 +92,21 @@ INDIAN_CITIES = [
 ]
 
 LOCATION_MAP = {
-    "work-from-home": "Remote / WFH", "remote": "Remote / WFH",
-    "multiple-locations": "Multiple Locations", "pan-india": "Pan India",
-    "bengaluru": "Bengaluru", "bangalore": "Bangalore",
-    "navi-mumbai": "Navi Mumbai", "gurugram": "Gurugram", "gurgaon": "Gurgaon",
-    "thiruvananthapuram": "Thiruvananthapuram", "trivandrum": "Thiruvananthapuram",
-    "calicut": "Kozhikode", "puducherry": "Puducherry", "pondicherry": "Puducherry",
-    "secunderabad": "Secunderabad", "mysuru": "Mysuru", "mysore": "Mysore",
+    "work-from-home":     "Remote / WFH",
+    "remote":             "Remote / WFH",
+    "multiple-locations": "Multiple Locations",
+    "pan-india":          "Pan India",
+    "bengaluru":          "Bengaluru",
+    "bangalore":          "Bangalore",
+    "navi-mumbai":        "Navi Mumbai",
+    "gurugram":           "Gurugram",
+    "gurgaon":            "Gurgaon",
+    "thiruvananthapuram": "Thiruvananthapuram",
+    "trivandrum":         "Thiruvananthapuram",
+    "calicut":            "Kozhikode",
+    "puducherry":         "Puducherry",
+    "pondicherry":        "Puducherry",
+    "secunderabad":       "Secunderabad",
 }
 
 COMPANY_INDICATORS = {
@@ -100,7 +117,7 @@ COMPANY_INDICATORS = {
     "digital", "analytics", "ventures", "networks", "telecom",
     "finance", "bank", "insurance", "healthcare", "pharma",
     "industries", "manufacturing", "engineering", "research",
-    "foundation", "trust",
+    "foundation", "trust", "ngo", "org",
 }
 
 
@@ -141,11 +158,10 @@ def setup_driver(headless: bool = True) -> webdriver.Chrome:
 # ============================================================================
 def build_url(keyword: str, location: str, page: int) -> str:
     """
-    Naukri internship search URLs:
-      All internships:          /internship-jobs
-      By keyword:               /{kw}-internship-jobs
-      By keyword + location:    /{kw}-internship-jobs-in-{city}
-      Pagination:               append -{page}
+    Build Naukri internship search URL.
+    Pattern: https://www.naukri.com/{keyword}-internship-jobs
+    With location: https://www.naukri.com/{keyword}-internship-jobs-in-{city}
+    Pagination: append -{page} at the end
     """
     if keyword.strip():
         slug = keyword.strip().lower().replace(" ", "-")
@@ -160,6 +176,7 @@ def build_url(keyword: str, location: str, page: int) -> str:
             base = f"https://www.naukri.com/internship-jobs-in-{loc}"
         else:
             base = "https://www.naukri.com/internship-jobs"
+
     return f"{base}-{page}" if page > 1 else base
 
 
@@ -201,18 +218,25 @@ def classify_role(title: str, text: str) -> str:
 def parse_slug(href: str) -> dict:
     """
     Extract title_hint, company, location, experience from the URL slug.
-    Naukri internship URLs: /job-listings-{title}-{company}-{city}-{exp}-{id}
-    Example:
+
+    Naukri internship URLs follow:
+      /job-listings-{title}-{company}-{city}-{exp}-years-{id}
+
+    Examples:
       /job-listings-software-developer-intern-siemens-bengaluru-0-to-1-years-090426929138
-      -> company: Siemens, location: Bengaluru, experience: 0-1 Yrs
+      /job-listings-marketing-intern-abc-solutions-mumbai-0-to-6-months-090426929138
     """
     out = {"title_hint": "", "company": "", "location": "", "experience": ""}
     try:
         clean = href.split("?")[0].split("#")[0]
+
+        # Extract slug after /job-listings-
         m = re.search(r"/job-listings-(.+)", clean)
         if not m:
             return out
         slug = m.group(1)
+
+        # Remove trailing numeric ID
         slug = re.sub(r"-\d{10,}$", "", slug)
 
         # Extract experience (months or years)
@@ -221,13 +245,13 @@ def parse_slug(href: str) -> dict:
         exp_single = re.search(r"(\d+)-(years?|months?)", slug)
         if exp_range:
             lo, hi, unit = exp_range.group(1), exp_range.group(2), exp_range.group(3)
-            unit_s = "Months" if "month" in unit else "Yrs"
-            exp = f"{lo}-{hi} {unit_s}"
+            unit_short = "Months" if "month" in unit else "Yrs"
+            exp = f"{lo}-{hi} {unit_short}"
             slug = slug[:exp_range.start()].rstrip("-")
         elif exp_single:
             n, unit = exp_single.group(1), exp_single.group(2)
-            unit_s = "Months" if "month" in unit else "Yrs"
-            exp = f"{n} {unit_s}"
+            unit_short = "Months" if "month" in unit else "Yrs"
+            exp = f"{n} {unit_short}"
             slug = slug[:exp_single.start()].rstrip("-")
         out["experience"] = exp
 
@@ -235,6 +259,7 @@ def parse_slug(href: str) -> dict:
         parts = slug.split("-")
         city_slug = ""
         city_end = len(parts)
+
         for i in range(len(parts) - 1, 0, -1):
             two = f"{parts[i-1]}-{parts[i]}"
             if two in INDIAN_CITIES:
@@ -248,27 +273,33 @@ def parse_slug(href: str) -> dict:
 
         if city_slug:
             out["location"] = LOCATION_MAP.get(
-                city_slug, city_slug.replace("-", " ").title()
+                city_slug,
+                city_slug.replace("-", " ").title()
             )
 
-        # Split remaining into title + company
+        # Split remaining slug into title + company
         pre = parts[:city_end]
         if len(pre) >= 4:
+            # Find rightmost company indicator to anchor split
             best_split = None
             for idx in range(len(pre) - 1, 0, -1):
                 if pre[idx].lower() in COMPANY_INDICATORS:
                     best_split = max(1, idx - 3)
                     break
             if best_split is not None:
-                title_p, company_p = pre[:best_split], pre[best_split:]
+                title_p   = pre[:best_split]
+                company_p = pre[best_split:]
             else:
-                split = max(2, len(pre) - 3)
-                title_p, company_p = pre[:split], pre[split:]
+                split     = max(2, len(pre) - 3)
+                title_p   = pre[:split]
+                company_p = pre[split:]
         else:
-            title_p, company_p = pre, []
+            title_p   = pre
+            company_p = []
 
         out["title_hint"] = " ".join(title_p).replace("-", " ").title()
         out["company"]    = " ".join(company_p).replace("-", " ").title()
+
     except Exception as e:
         log.debug("parse_slug error %s: %s", href, e)
     return out
@@ -278,15 +309,18 @@ def parse_slug(href: str) -> dict:
 #  CARD TEXT  — SECONDARY data source
 # ============================================================================
 def get_card_text(link_el, driver) -> str:
-    """Walk up DOM from link to find the single-card container."""
+    """Walk up DOM from link to find the single-card container. No class assumptions."""
     try:
-        current = link_el
-        best, best_len = "", 0
+        current  = link_el
+        best     = ""
+        best_len = 0
+
         for _ in range(12):
             try:
                 parent = current.find_element(By.XPATH, "..")
             except Exception:
                 break
+
             tag = ""
             try:
                 tag = parent.tag_name.lower()
@@ -294,21 +328,29 @@ def get_card_text(link_el, driver) -> str:
                 pass
             if tag in ("body", "html", "main"):
                 break
+
+            # Count internship links in this container
             try:
                 n = len(parent.find_elements(
                     By.XPATH, ".//a[contains(@href,'job-listings')]"
                 ))
             except Exception:
                 n = 0
+
             text = get_text(parent, driver)
             tlen = len(text)
+
             if n == 1 and tlen > best_len:
-                best, best_len = text, tlen
-                current = parent
+                best     = text
+                best_len = tlen
+                current  = parent
                 continue
+
             if n > 1:
                 break
+
             current = parent
+
         return best
     except Exception:
         return ""
@@ -323,7 +365,7 @@ def parse_internship(link_el, href: str, driver) -> Optional[dict]:
     card_text = get_card_text(link_el, driver)
     lines     = [l.strip() for l in card_text.split("\n") if l.strip()]
 
-    # TITLE
+    # ── TITLE ─────────────────────────────────────────────────────────────────
     title = ""
     try:
         t = get_text(link_el, driver)
@@ -331,36 +373,40 @@ def parse_internship(link_el, href: str, driver) -> Optional[dict]:
             title = t
     except Exception:
         pass
+
     if not title:
-        skip = {"lpa", "apply", "years", "yrs", "openings", "view", "rating", "reviews"}
+        skip = {"₹", "lpa", "apply", "years", "yrs", "openings",
+                "view", "rating", "reviews", "salary", "experience"}
         for line in lines[:5]:
             if (3 < len(line) < 150
                     and not any(s in line.lower() for s in skip)
                     and not re.search(r"^\d+(\.\d+)?$", line)):
                 title = line
                 break
+
     if not title:
         title = slug_data.get("title_hint", "")
     if not title:
         return None
 
-    # COMPANY
+    # ── COMPANY ───────────────────────────────────────────────────────────────
     company = ""
-    bad = {"lpa", "apply", "years", "yrs", "openings", "view", "salary",
-           "experience", "location", "posted", "rating", "reviews",
-           "hot", "urgent", "new", "featured", "fresher"}
+    bad = {"₹", "lpa", "apply", "years", "yrs", "openings", "view",
+           "salary", "experience", "location", "posted", "rating",
+           "reviews", "hot", "urgent", "new", "featured", "fresher"}
     for line in lines[1:8]:
-        if (line != title and 1 < len(line) < 100
+        if (line != title
+                and 1 < len(line) < 100
                 and not any(b in line.lower() for b in bad)
                 and not re.search(r"^\d+(\.\d+)?$", line)
                 and not re.search(r"\d+\s*(yr|year|month|lpa|lac)", line.lower())
-                and not re.search(r"^\d+[-\u2013]\d+", line)):
+                and not re.search(r"^\d+[-–]\d+", line)):
             company = line
             break
     if not company:
         company = slug_data.get("company", "") or "N/A"
 
-    # LOCATION
+    # ── LOCATION ──────────────────────────────────────────────────────────────
     location = ""
     lower = card_text.lower()
     if any(r in lower for r in ["work from home", "remote", "wfh"]):
@@ -385,33 +431,33 @@ def parse_internship(link_el, href: str, driver) -> Optional[dict]:
         )
         found = re.findall(city_re, card_text, re.IGNORECASE)
         if found:
-            seen_c, unique = set(), []
+            seen, unique = set(), []
             for c in found:
-                if c.lower() not in seen_c:
-                    seen_c.add(c.lower())
+                if c.lower() not in seen:
+                    seen.add(c.lower())
                     unique.append(c)
             location = ", ".join(unique[:3])
     if not location:
         location = slug_data.get("location", "") or "N/A"
 
-    # DURATION / EXPERIENCE
-    duration = ""
-    em = re.search(r"(\d+)\s*[-\u2013]\s*(\d+)\s*(?:Months?|Yrs?|Years?)", card_text, re.IGNORECASE)
+    # ── EXPERIENCE / DURATION ─────────────────────────────────────────────────
+    experience = ""
+    em = re.search(r"(\d+)\s*[-–]\s*(\d+)\s*(?:Months?|Yrs?|Years?)", card_text, re.IGNORECASE)
     if em:
-        duration = em.group(0).strip()
+        experience = em.group(0).strip()
     elif re.search(r"\b(fresher|0\s*year|entry\s*level)\b", card_text, re.IGNORECASE):
-        duration = "Fresher / 0 Yrs"
+        experience = "Fresher / 0 Yrs"
     else:
         se = re.search(r"(\d+)\+?\s*(?:Months?|Yrs?|Years?)", card_text, re.IGNORECASE)
         if se:
-            duration = se.group(0).strip()
-    if not duration:
-        duration = slug_data.get("experience", "") or "N/A"
+            experience = se.group(0).strip()
+    if not experience:
+        experience = slug_data.get("experience", "") or "N/A"
 
-    # STIPEND
+    # ── STIPEND / SALARY ──────────────────────────────────────────────────────
     stipend = "N/A"
     sm = re.search(
-        r"(?:\u20b9\s*)?(\d+(?:\.\d+)?)\s*[-\u2013]\s*(\d+(?:\.\d+)?)"
+        r"(?:₹\s*)?(\d+(?:\.\d+)?)\s*[-–]\s*(\d+(?:\.\d+)?)"
         r"\s*(?:Lacs?|LPA|L\.?P\.?A\.?|Lakhs?|K)\s*(?:PA|P\.?A\.?)?",
         card_text, re.IGNORECASE
     )
@@ -420,11 +466,11 @@ def parse_internship(link_el, href: str, driver) -> Optional[dict]:
     elif re.search(r"not\s+disclosed|unpaid", card_text, re.IGNORECASE):
         stipend = "Unpaid / Not Disclosed"
     else:
-        ss = re.search(r"\u20b9\s*[\d,]+", card_text)
+        ss = re.search(r"₹\s*[\d,]+", card_text)
         if ss:
             stipend = ss.group(0).strip()
 
-    # POSTED DATE
+    # ── POSTED DATE ───────────────────────────────────────────────────────────
     posted = "N/A"
     pm = re.search(r"(\d+)\s*(day|hour|week|month)s?\s*ago", card_text, re.IGNORECASE)
     if pm:
@@ -434,31 +480,75 @@ def parse_internship(link_el, href: str, driver) -> Optional[dict]:
     elif re.search(r"yesterday", card_text, re.IGNORECASE):
         posted = "Yesterday"
 
-    # DESCRIPTION
+    # ── DESCRIPTION ───────────────────────────────────────────────────────────
     description = "N/A"
-    skip_d = {"lpa", "apply", "view", "openings", "salary", "experience", "rating", "reviews"}
+    skip_d = {"₹", "lpa", "apply", "view", "openings", "salary",
+              "experience", "rating", "reviews"}
     for line in lines:
-        if (len(line) > 40 and line != title and line != company
+        if (len(line) > 40
+                and line != title
+                and line != company
                 and not any(s in line.lower() for s in skip_d)
                 and not re.search(r"\d+\s*(yr|year|month|lpa|lac)", line.lower())
                 and not re.search(r"^\d+(\.\d+)?$", line)):
             description = line
             break
 
+    # ── RESPONSIBILITIES ──────────────────────────────────────────────────────
+    responsibilities = []
+    numbered = re.findall(
+        r"(?:^|\n)\s*\d+[\.\)]\s*(.+?)(?=\n\s*\d+[\.\)]|\Z)",
+        card_text, re.DOTALL
+    )
+    for r_item in numbered:
+        r_item = re.sub(r"\s+", " ", r_item).strip()
+        if 10 < len(r_item) < 300:
+            responsibilities.append(r_item)
+    responsibilities = responsibilities[:8]
+
+    # ── PERKS ─────────────────────────────────────────────────────────────────
+    PERK_PATTERNS_LOCAL = [
+        (r"\bcertificate\b", "Certificate"),
+        (r"\bletter of recommendation\b|\blor\b", "Letter of Recommendation"),
+        (r"\bflexible hours?\b|\bflexible timing\b", "Flexible hours"),
+        (r"\b5\s*days?/?\s*week\b", "5 days/week"),
+        (r"\bwork from home\b|\bwfh\b|\bremote\b", "Work from home"),
+        (r"\bpre-placement\s*offer\b|\bppo\b", "Pre-Placement Offer"),
+        (r"\bmentorship\b", "Mentorship"),
+        (r"\bperformance\s*bonus\b|\bincentive\b", "Performance bonus"),
+    ]
+    perks = []
+    lower_card = card_text.lower()
+    for pattern, perk_name in PERK_PATTERNS_LOCAL:
+        if re.search(pattern, lower_card) and perk_name not in perks:
+            perks.append(perk_name)
+
+    # ── OPENINGS ──────────────────────────────────────────────────────────────
+    openings = 1
+    om = re.search(r"(\d+)\s*(?:opening|position|seat|vacanc)s?", card_text, re.IGNORECASE)
+    if om:
+        n = int(om.group(1))
+        if 1 <= n <= 500:
+            openings = n
+
+    # ── SKILLS & ROLE ─────────────────────────────────────────────────────────
     skills = extract_skills(f"{title} {card_text}")
     role   = classify_role(title, card_text)
 
     return {
-        "title":       title,
-        "company":     company,
-        "location":    location,
-        "stipend":     stipend,
-        "duration":    duration,
-        "posted":      posted,
-        "skills":      skills,
-        "type":        role,
-        "link":        url,
-        "description": description,
+        "title":            title,
+        "company":          company,
+        "location":         location,
+        "stipend":          stipend,
+        "duration":         experience,
+        "posted":           posted,
+        "skills":           skills,
+        "type":             role,
+        "link":             url,
+        "description":      description,
+        "responsibilities": responsibilities,
+        "perks":            perks,
+        "openings":         openings,
     }
 
 
@@ -467,7 +557,7 @@ def parse_internship(link_el, href: str, driver) -> Optional[dict]:
 # ============================================================================
 def scrape_page(driver: webdriver.Chrome, page_num: int) -> list:
     url = build_url(SEARCH_KEYWORD, SEARCH_LOCATION, page_num)
-    log.info("Page %d -> %s", page_num, url)
+    log.info("── Page %d → %s", page_num, url)
     driver.get(url)
 
     try:
@@ -480,6 +570,7 @@ def scrape_page(driver: webdriver.Chrome, page_num: int) -> list:
 
     time.sleep(3)
 
+    # Scroll to trigger lazy loading
     last_h = driver.execute_script("return document.body.scrollHeight")
     for _ in range(15):
         driver.execute_script("window.scrollBy(0, 500);")
@@ -491,6 +582,8 @@ def scrape_page(driver: webdriver.Chrome, page_num: int) -> list:
     driver.execute_script("window.scrollTo(0, 0);")
     time.sleep(1)
 
+    # Collect all unique internship links
+    # Naukri internship cards use /job-listings-...-{10-12 digit ID} URLs
     all_links = driver.find_elements(By.TAG_NAME, "a")
     log.info("Found %d total links on page %d", len(all_links), page_num)
 
@@ -502,6 +595,7 @@ def scrape_page(driver: webdriver.Chrome, page_num: int) -> list:
                 continue
             if "job-listings" not in href:
                 continue
+            # Must end with a 10-12 digit ID
             m = re.search(r"-(\d{10,12})$", href.split("?")[0])
             if not m:
                 continue
@@ -513,7 +607,7 @@ def scrape_page(driver: webdriver.Chrome, page_num: int) -> list:
 
     log.info("Unique internship IDs on page %d: %d", page_num, len(seen))
     if not seen:
-        log.warning("No internship links on page %d", page_num)
+        log.warning("No internship links found on page %d — check URL or bot detection", page_num)
         return []
 
     results = []
@@ -524,28 +618,32 @@ def scrape_page(driver: webdriver.Chrome, page_num: int) -> list:
                 link_el
             )
             time.sleep(0.3)
+
             item = parse_internship(link_el, href, driver)
             if item:
                 results.append(item)
                 log.info(
-                    "  [%d/%d] OK %-40s | %-22s | %-10s | %s",
+                    "  [%d/%d] ✓ %-45s | %-25s | %-12s | %s",
                     idx, len(seen),
-                    item["title"][:40],
-                    item["company"][:22],
+                    item["title"][:45],
+                    item["company"][:25],
                     item["duration"],
                     item["location"],
                 )
+            else:
+                log.debug("  [%d/%d] ✗ skipped", idx, len(seen))
+
         except StaleElementReferenceException:
-            pass
+            log.debug("  [%d/%d] stale", idx, len(seen))
         except Exception as e:
             log.debug("  [%d/%d] error: %s", idx, len(seen), e)
 
-    log.info("Page %d done: %d extracted", page_num, len(results))
+    log.info("Page %d: %d extracted from %d links", page_num, len(results), len(seen))
     return results
 
 
 # ============================================================================
-#  DEDUPLICATE + SAVE
+#  DEDUPLICATE
 # ============================================================================
 def deduplicate(items: list) -> list:
     seen, out = set(), []
@@ -558,11 +656,14 @@ def deduplicate(items: list) -> list:
     return out
 
 
+# ============================================================================
+#  SAVE
+# ============================================================================
 def save_json(items: list, path: str):
     try:
         with open(path, "w", encoding="utf-8") as f:
             f.write(json.dumps(items, indent=2, ensure_ascii=False))
-        log.info("Saved %d items -> %s", len(items), path)
+        log.info("Saved %d items → %s", len(items), path)
     except Exception as e:
         log.warning("Could not save %s: %s", path, e)
 
@@ -571,7 +672,7 @@ def save_json(items: list, path: str):
 #  MAIN
 # ============================================================================
 def main():
-    log.info("=== Naukri Internship Scraper ===")
+    log.info("Naukri Internship Scraper")
     log.info("Keyword: '%s' | Location: '%s' | Pages: %d",
              SEARCH_KEYWORD or "all", SEARCH_LOCATION or "All India", PAGES)
 
@@ -582,10 +683,11 @@ def main():
     try:
         for page in range(1, PAGES + 1):
             data = scrape_page(driver, page)
+
             if not data:
                 consecutive_empty += 1
                 if consecutive_empty >= 3:
-                    log.info("3 consecutive empty pages, stopping.")
+                    log.info("3 consecutive empty pages — stopping.")
                     break
             else:
                 consecutive_empty = 0
@@ -593,16 +695,22 @@ def main():
                 log.info("Cumulative: %d (page %d/%d)", len(all_items), page, PAGES)
                 if page % 5 == 0:
                     save_json(all_items, OUTPUT_RAW)
+
             time.sleep(2)
+
     finally:
         driver.quit()
         log.info("Browser closed.")
 
+    # Save raw
     save_json(all_items, OUTPUT_RAW)
+
+    # Dedup + final
     unique = deduplicate(all_items)
     log.info("After dedup: %d", len(unique))
     save_json(unique, OUTPUT_FINAL)
 
+    # Quality report
     fields = ["company", "location", "stipend", "duration", "posted", "description"]
     log.info("=== DATA COMPLETENESS ===")
     for f in fields:

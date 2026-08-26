@@ -27,6 +27,10 @@ import logging
 import requests
 from typing import Optional
 from collections import Counter
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from format_internship import format_and_save
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,7 +40,7 @@ logging.basicConfig(
 log = logging.getLogger("unstop")
 
 # ── Config ────────────────────────────────────────────────────────────────────
-TARGET       = 300        # Stop after collecting this many unique internships
+TARGET       = 400        # Stop after collecting this many unique internships
 PER_PAGE     = 20         # Items per API page (max 20)
 MAX_PAGES    = 100        # Safety cap on pages to fetch
 OUTPUT_RAW   = "unstop_raw.json"
@@ -293,6 +297,59 @@ def parse_api_item(item: dict) -> Optional[dict]:
                     description = s[:300]
                     break
 
+        # ── Responsibilities from description ─────────────────────────────
+        responsibilities = []
+        if details_text:
+            numbered = re.findall(
+                r"(?:^|\n)\s*\d+[\.\)]\s*(.+?)(?=\n\s*\d+[\.\)]|\Z)",
+                details_text, re.DOTALL
+            )
+            for r_item in numbered:
+                r_item = re.sub(r"\s+", " ", r_item).strip()
+                if 10 < len(r_item) < 300:
+                    responsibilities.append(r_item)
+            if not responsibilities:
+                # Try dash/bullet list
+                bulleted = re.findall(
+                    r"(?:^|\n)\s*[-•*]\s*(.+?)(?=\n\s*[-•*]|\Z)",
+                    details_text, re.DOTALL
+                )
+                for r_item in bulleted:
+                    r_item = re.sub(r"\s+", " ", r_item).strip()
+                    if 10 < len(r_item) < 300:
+                        responsibilities.append(r_item)
+        responsibilities = responsibilities[:8]
+
+        # ── Perks ─────────────────────────────────────────────────────────
+        PERK_PATTERNS_LOCAL = [
+            (r"\bcertificate\b", "Certificate"),
+            (r"\bletter of recommendation\b|\blor\b", "Letter of Recommendation"),
+            (r"\bflexible hours?\b|\bflexible timing\b", "Flexible hours"),
+            (r"\b5\s*days?/?\s*week\b", "5 days/week"),
+            (r"\bwork from home\b|\bwfh\b|\bremote\b", "Work from home"),
+            (r"\bpre-placement\s*offer\b|\bppo\b", "Pre-Placement Offer"),
+            (r"\bmentorship\b", "Mentorship"),
+            (r"\bperformance\s*bonus\b|\bincentive\b", "Performance bonus"),
+        ]
+        perks = []
+        lower_details = details_text.lower()
+        for pattern, perk_name in PERK_PATTERNS_LOCAL:
+            if re.search(pattern, lower_details) and perk_name not in perks:
+                perks.append(perk_name)
+
+        # ── Openings ──────────────────────────────────────────────────────
+        openings = item.get("no_of_openings", 0) or item.get("openings", 0) or 0
+        if not openings:
+            om = re.search(
+                r"(\d+)\s*(?:opening|position|seat|vacanc)s?",
+                details_text, re.IGNORECASE
+            )
+            if om:
+                n = int(om.group(1))
+                openings = n if 1 <= n <= 500 else 1
+            else:
+                openings = 1
+
         # ── Skills from API ───────────────────────────────────────────────
         api_skills = []
         for sk in item.get("required_skills", []):
@@ -310,18 +367,21 @@ def parse_api_item(item: dict) -> Optional[dict]:
         role = classify_role(title, f"{wf_names} {details_text}")
 
         return {
-            "id":          opp_id,
-            "title":       title,
-            "company":     company,
-            "location":    location,
-            "work_type":   work_type,
-            "stipend":     stipend,
-            "deadline":    deadline,
-            "posted":      posted,
-            "skills":      all_skills,
-            "type":        role,
-            "link":        link,
-            "description": description,
+            "id":               opp_id,
+            "title":            title,
+            "company":          company,
+            "location":         location,
+            "work_type":        work_type,
+            "stipend":          stipend,
+            "deadline":         deadline,
+            "posted":           posted,
+            "skills":           all_skills,
+            "type":             role,
+            "link":             link,
+            "description":      description,
+            "responsibilities": responsibilities,
+            "perks":            perks,
+            "openings":         openings,
         }
 
     except Exception as e:
@@ -425,10 +485,9 @@ def main():
     # ── Save raw ──────────────────────────────────────────────────────────────
     save_json(all_items, OUTPUT_RAW)
 
-    # ── Dedup + final save ────────────────────────────────────────────────────
+    # ── Dedup ─────────────────────────────────────────────────────────────────
     unique = deduplicate(all_items)
     log.info("After dedup: %d unique internships", len(unique))
-    save_json(unique, OUTPUT_FINAL)
 
     # ── Quality report ────────────────────────────────────────────────────────
     if unique:
@@ -447,8 +506,16 @@ def main():
         for skill, cnt in Counter(all_skills).most_common(10):
             log.info("  %-25s %d", skill, cnt)
 
-    print(f"\nTotal internships scraped: {len(unique)}")
-    return unique
+    # ── Save formatted (standardized MongoDB format) ──────────────────────────
+    formatted = format_and_save(
+        unique,
+        source="unstop",
+        output_path=OUTPUT_FINAL,
+    )
+    log.info("Saved %d formatted internships → %s", len(formatted), OUTPUT_FINAL)
+
+    print(f"\nTotal internships scraped: {len(formatted)}")
+    return formatted
 
 
 if __name__ == "__main__":

@@ -20,6 +20,10 @@ import time
 import logging
 from datetime import datetime, date
 from typing import Optional
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from format_internship import format_and_save
 
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -314,21 +318,62 @@ def parse_card(card_el, href: str, driver) -> Optional[dict]:
             description = line
             break
 
+    # ── RESPONSIBILITIES ──────────────────────────────────────────────────────
+    # Internshala descriptions often contain numbered lists of responsibilities
+    responsibilities = []
+    numbered = re.findall(
+        r"(?:^|\n)\s*\d+[\.\)]\s*(.+?)(?=\n\s*\d+[\.\)]|\Z)",
+        text, re.DOTALL
+    )
+    for item in numbered:
+        item = re.sub(r"\s+", " ", item).strip()
+        if 10 < len(item) < 300:
+            responsibilities.append(item)
+    responsibilities = responsibilities[:8]
+
+    # ── PERKS ─────────────────────────────────────────────────────────────────
+    PERK_PATTERNS = [
+        (r"\bcertificate\b", "Certificate"),
+        (r"\bletter of recommendation\b|\blor\b", "Letter of Recommendation"),
+        (r"\bflexible hours?\b|\bflexible timing\b", "Flexible hours"),
+        (r"\b5\s*days?/?\s*week\b", "5 days/week"),
+        (r"\bwork from home\b|\bwfh\b", "Work from home"),
+        (r"\bpre-placement\s*offer\b|\bppo\b", "Pre-Placement Offer"),
+        (r"\bmentorship\b", "Mentorship"),
+        (r"\bperformance\s*bonus\b|\bincentive\b", "Performance bonus"),
+    ]
+    perks = []
+    lower_text = text.lower()
+    for pattern, perk_name in PERK_PATTERNS:
+        if re.search(pattern, lower_text) and perk_name not in perks:
+            perks.append(perk_name)
+
+    # ── OPENINGS ──────────────────────────────────────────────────────────────
+    openings = 1
+    om = re.search(r"(\d+)\s*(?:opening|position|seat|vacanc)s?", text, re.IGNORECASE)
+    if om:
+        n = int(om.group(1))
+        if 1 <= n <= 500:
+            openings = n
+
     # ── SKILLS & ROLE ────────────────────────────────────────────────────────
     skills = extract_skills(text)
     role   = classify_role(title, text)
 
     return {
-        "title":       title,
-        "company":     company,
-        "location":    location,
-        "stipend":     stipend,
-        "duration":    duration,
-        "apply_by":    apply_by,
-        "skills":      skills,
-        "type":        role,
-        "link":        link,
-        "description": description,
+        "title":            title,
+        "company":          company,
+        "location":         location,
+        "stipend":          stipend,
+        "duration":         duration,
+        "apply_by":         apply_by,
+        "skills":           skills,
+        "type":             role,
+        "link":             link,
+        "description":      description,
+        "responsibilities": responsibilities,
+        "perks":            perks,
+        "openings":         openings,
     }
 
 
@@ -662,19 +707,27 @@ def main():
             pct = sum(1 for i in active if i.get(f, "N/A") not in ("N/A", "")) / len(active) * 100
             log.info("  %-15s %.0f%%", f, pct)
 
-    # Save
+    # Save raw (old format)
     out_str = json.dumps(active, indent=2, ensure_ascii=False)
-    with open("internships.json", "w", encoding="utf-8") as fh:
+    with open("internships_raw.json", "w", encoding="utf-8") as fh:
         fh.write(out_str)
-    log.info("Saved %d internships → internships.json", len(active))
+    log.info("Saved %d raw internships → internships_raw.json", len(active))
+
+    # Save formatted (new standardized format)
+    formatted = format_and_save(
+        active,
+        source="internshala",
+        output_path="internships.json",
+    )
+    log.info("Saved %d formatted internships → internships.json", len(formatted))
 
     if len(active) < 200:
         log.warning("⚠️  Only %d internships scraped — expected >200. Try increasing PAGES.", len(active))
     else:
         log.info("✅  Scraped %d internships total", len(active))
 
-    print(f"\nTotal scraped: {len(active)}")
-    return active
+    print(f"\nTotal scraped: {len(formatted)}")
+    return formatted
 
 
 if __name__ == "__main__":

@@ -1,0 +1,14 @@
+# Environment / secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# Scraped data (optional — remove these lines if you want to commit data)
+# freshersworld_scraper/fw_raw.json
+# freshersworld_scraper/fw_enriched.json

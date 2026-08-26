@@ -1,0 +1,1458 @@
+[
+  {
+    "_id": {
+      "$oid": "9f4a32edfc7731f5beea66d4"
+    },
+    "name": "Full Stack Web Development with AI Internship",
+    "company": "• Share",
+    "applyLink": "https://letsintern.in/full-stack-web-developer-intern-with-ai/",
+    "datePublished": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "deadlineDate": null,
+    "country": "India",
+    "state": "",
+    "city": "",
+    "isRemote": true,
+    "stipend": {
+      "type": "paid",
+      "amount": 16000,
+      "currency": "INR",
+      "period": "monthly"
+    },
+    "duration": {
+      "value": 6,
+      "unit": "months"
+    },
+    "skills": [
+      "Ai",
+      "Aws",
+      "Css",
+      "Devops",
+      "Figma",
+      "Git",
+      "Html",
+      "Java",
+      "Javascript",
+      "Machine learning",
+      "Mongodb",
+      "Mysql",
+      "Node",
+      "Python",
+      "React",
+      "Sql",
+      "Wordpress"
+    ],
+    "degree": [
+      "M.Tech"
+    ],
+    "field": [],
+    "experienceRequired": {
+      "min": 0,
+      "max": 0,
+      "unit": "months"
+    },
+    "openings": 1,
+    "summary": "Internship with Performance-Based Stipend + Live Client Projects | Stipend Performance Based",
+    "responsibilities": [],
+    "perks": [
+      "Stipend"
+    ],
+    "tags": [
+      "ai",
+      "aws",
+      "css",
+      "development",
+      "devops",
+      "figma",
+      "intern",
+      "remote",
+      "software"
+    ],
+    "source": "letsintern",
+    "isActive": true,
+    "createdAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "updatedAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    }
+  },
+  {
+    "_id": {
+      "$oid": "f4f96eb1d7ee5447b7605d0b"
+    },
+    "name": "Data Science Internship",
+    "company": "Verified Certificate &",
+    "applyLink": "https://letsintern.in/python-developer-internship/",
+    "datePublished": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "deadlineDate": null,
+    "country": "India",
+    "state": "",
+    "city": "",
+    "isRemote": true,
+    "stipend": {
+      "type": "performance_based",
+      "amount": 0,
+      "currency": "INR",
+      "period": "monthly"
+    },
+    "duration": {
+      "value": 6,
+      "unit": "months"
+    },
+    "skills": [
+      "Ai",
+      "Aws",
+      "Devops",
+      "Java",
+      "Mongodb",
+      "Node",
+      "Python",
+      "React",
+      "Sql",
+      "Wordpress"
+    ],
+    "degree": [],
+    "field": [
+      "Science"
+    ],
+    "experienceRequired": {
+      "min": 0,
+      "max": 0,
+      "unit": "months"
+    },
+    "openings": 1,
+    "summary": "Internship with Performance-Based Monthly Stipend performance based and Real Client Projects",
+    "responsibilities": [],
+    "perks": [
+      "Stipend"
+    ],
+    "tags": [
+      "ai",
+      "aws",
+      "development",
+      "devops",
+      "intern",
+      "java",
+      "mongodb",
+      "remote",
+      "software"
+    ],
+    "source": "letsintern",
+    "isActive": true,
+    "createdAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "updatedAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    }
+  },
+  {
+    "_id": {
+      "$oid": "f8cf69223490e0772c610048"
+    },
+    "name": "Data Analyst Internship with AI 2026",
+    "company": "• Share",
+    "applyLink": "https://letsintern.in/data-analyst-internship-with-ai-2026/",
+    "datePublished": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "deadlineDate": null,
+    "country": "India",
+    "state": "",
+    "city": "",
+    "isRemote": true,
+    "stipend": {
+      "type": "paid",
+      "amount": 16000,
+      "currency": "INR",
+      "period": "monthly"
+    },
+    "duration": {
+      "value": 6,
+      "unit": "months"
+    },
+    "skills": [
+      "Ai",
+      "Aws",
+      "Data analysis",
+      "Devops",
+      "Excel",
+      "Git",
+      "Java",
+      "Machine learning",
+      "Mysql",
+      "Numpy",
+      "Pandas",
+      "Postgresql",
+      "Power bi",
+      "Python",
+      "Sql",
+      "Tableau",
+      "Wordpress"
+    ],
+    "degree": [],
+    "field": [
+      "Design"
+    ],
+    "experienceRequired": {
+      "min": 0,
+      "max": 0,
+      "unit": "months"
+    },
+    "openings": 1,
+    "summary": "Data Analyst Internship with AI at LetsIntern is designed to help students,working",
+    "responsibilities": [],
+    "perks": [],
+    "tags": [
+      "ai",
+      "aws",
+      "data",
+      "data analysis",
+      "devops",
+      "excel",
+      "intern",
+      "remote",
+      "science"
+    ],
+    "source": "letsintern",
+    "isActive": true,
+    "createdAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "updatedAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    }
+  },
+  {
+    "_id": {
+      "$oid": "9a69af771749485dfb07dbf0"
+    },
+    "name": "Data Science Internship",
+    "company": "Monthly Stipend",
+    "applyLink": "https://letsintern.in/data-science-internship/",
+    "datePublished": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "deadlineDate": null,
+    "country": "India",
+    "state": "",
+    "city": "",
+    "isRemote": true,
+    "stipend": {
+      "type": "paid",
+      "amount": 16000,
+      "currency": "INR",
+      "period": "monthly"
+    },
+    "duration": {
+      "value": 6,
+      "unit": "months"
+    },
+    "skills": [
+      "Ai",
+      "Aws",
+      "Data analysis",
+      "Deep learning",
+      "Devops",
+      "Excel",
+      "Git",
+      "Java",
+      "Machine learning",
+      "Mongodb",
+      "Mysql",
+      "Nlp",
+      "Node",
+      "Numpy",
+      "Pandas",
+      "Power bi",
+      "Python",
+      "React",
+      "Scikit-learn",
+      "Sql",
+      "Tableau",
+      "Tensorflow",
+      "Wordpress"
+    ],
+    "degree": [],
+    "field": [
+      "Science"
+    ],
+    "experienceRequired": {
+      "min": 0,
+      "max": 0,
+      "unit": "months"
+    },
+    "openings": 1,
+    "summary": "Internship with Performance-Based Monthly Stipend performance based and Real Client Projects",
+    "responsibilities": [],
+    "perks": [
+      "Stipend"
+    ],
+    "tags": [
+      "ai",
+      "aws",
+      "data analysis",
+      "deep learning",
+      "development",
+      "devops",
+      "intern",
+      "remote",
+      "software"
+    ],
+    "source": "letsintern",
+    "isActive": true,
+    "createdAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "updatedAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    }
+  },
+  {
+    "_id": {
+      "$oid": "5c2c59f5cb05276c5caeb329"
+    },
+    "name": "AI Machine Learning Internship",
+    "company": "Verified Certificate &",
+    "applyLink": "https://letsintern.in/ai-machine-learning-internship/",
+    "datePublished": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "deadlineDate": null,
+    "country": "India",
+    "state": "",
+    "city": "",
+    "isRemote": true,
+    "stipend": {
+      "type": "paid",
+      "amount": 16000,
+      "currency": "INR",
+      "period": "monthly"
+    },
+    "duration": {
+      "value": 6,
+      "unit": "months"
+    },
+    "skills": [
+      "Ai",
+      "Aws",
+      "Data analysis",
+      "Deep learning",
+      "Devops",
+      "Flask",
+      "Java",
+      "Machine learning",
+      "Mongodb",
+      "Nlp",
+      "Node",
+      "Numpy",
+      "Pandas",
+      "Python",
+      "Pytorch",
+      "React",
+      "Scikit-learn",
+      "Sql",
+      "Tensorflow",
+      "Wordpress"
+    ],
+    "degree": [],
+    "field": [],
+    "experienceRequired": {
+      "min": 0,
+      "max": 0,
+      "unit": "months"
+    },
+    "openings": 1,
+    "summary": "Internship with Performance-Based Monthly Stipend Based and Real AI Projects",
+    "responsibilities": [],
+    "perks": [
+      "Stipend"
+    ],
+    "tags": [
+      "ai",
+      "aws",
+      "data",
+      "data analysis",
+      "deep learning",
+      "devops",
+      "intern",
+      "remote",
+      "science"
+    ],
+    "source": "letsintern",
+    "isActive": true,
+    "createdAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "updatedAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    }
+  },
+  {
+    "_id": {
+      "$oid": "caea8f4484730dbd81051f53"
+    },
+    "name": "AI Machine Learning Internship",
+    "company": "Verified Certificate &",
+    "applyLink": "https://letsintern.in/devops-internship/",
+    "datePublished": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "deadlineDate": null,
+    "country": "India",
+    "state": "",
+    "city": "",
+    "isRemote": true,
+    "stipend": {
+      "type": "paid",
+      "amount": 16000,
+      "currency": "INR",
+      "period": "monthly"
+    },
+    "duration": {
+      "value": 6,
+      "unit": "months"
+    },
+    "skills": [
+      "Ai",
+      "Aws",
+      "Azure",
+      "Bash",
+      "Devops",
+      "Docker",
+      "Git",
+      "Java",
+      "Kubernetes",
+      "Linux",
+      "Machine learning",
+      "Mongodb",
+      "Node",
+      "Python",
+      "React",
+      "Sql",
+      "Wordpress"
+    ],
+    "degree": [
+      "B.Tech"
+    ],
+    "field": [],
+    "experienceRequired": {
+      "min": 0,
+      "max": 0,
+      "unit": "months"
+    },
+    "openings": 1,
+    "summary": "Limited Seats Available — Apply Before Registrations Close",
+    "responsibilities": [],
+    "perks": [],
+    "tags": [
+      "ai",
+      "aws",
+      "azure",
+      "bash",
+      "development",
+      "devops",
+      "intern",
+      "remote",
+      "software"
+    ],
+    "source": "letsintern",
+    "isActive": true,
+    "createdAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "updatedAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    }
+  },
+  {
+    "_id": {
+      "$oid": "963318ee3203a07372e941ee"
+    },
+    "name": "What's New ?",
+    "company": "• Share",
+    "applyLink": "https://letsintern.in/web-development-internship/",
+    "datePublished": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "deadlineDate": null,
+    "country": "India",
+    "state": "",
+    "city": "",
+    "isRemote": true,
+    "stipend": {
+      "type": "paid",
+      "amount": 16000,
+      "currency": "INR",
+      "period": "monthly"
+    },
+    "duration": {
+      "value": 6,
+      "unit": "months"
+    },
+    "skills": [
+      "Ai",
+      "Angular",
+      "Aws",
+      "Css",
+      "Devops",
+      "Figma",
+      "Git",
+      "Html",
+      "Java",
+      "Javascript",
+      "Linux",
+      "Mongodb",
+      "Mysql",
+      "Node",
+      "Postgresql",
+      "Python",
+      "React",
+      "Sql",
+      "Vue",
+      "Wordpress"
+    ],
+    "degree": [],
+    "field": [],
+    "experienceRequired": {
+      "min": 0,
+      "max": 0,
+      "unit": "months"
+    },
+    "openings": 1,
+    "summary": "Internship with Performance-Based Stipend + Live Client Projects | Stipend Provided (₹10,000 – ₹16,000)",
+    "responsibilities": [],
+    "perks": [
+      "Stipend"
+    ],
+    "tags": [
+      "ai",
+      "angular",
+      "aws",
+      "css",
+      "development",
+      "devops",
+      "remote",
+      "software"
+    ],
+    "source": "letsintern",
+    "isActive": true,
+    "createdAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "updatedAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    }
+  },
+  {
+    "_id": {
+      "$oid": "5c969f6aed6fae0f9ecaf7ac"
+    },
+    "name": "Full Stack Web Development Internship",
+    "company": "• Share",
+    "applyLink": "https://letsintern.in/full-stack-web-development-2/",
+    "datePublished": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "deadlineDate": null,
+    "country": "India",
+    "state": "",
+    "city": "",
+    "isRemote": true,
+    "stipend": {
+      "type": "paid",
+      "amount": 18000,
+      "currency": "INR",
+      "period": "monthly"
+    },
+    "duration": {
+      "value": 6,
+      "unit": "months"
+    },
+    "skills": [
+      "Ai",
+      "Aws",
+      "Css",
+      "Devops",
+      "Figma",
+      "Git",
+      "Html",
+      "Java",
+      "Javascript",
+      "Machine learning",
+      "Mongodb",
+      "Mysql",
+      "Node",
+      "Python",
+      "React",
+      "Sql",
+      "Wordpress"
+    ],
+    "degree": [
+      "M.Tech"
+    ],
+    "field": [],
+    "experienceRequired": {
+      "min": 1,
+      "max": 6,
+      "unit": "months"
+    },
+    "openings": 1,
+    "summary": "Live Internship | Verified Certificates | Client-Based Project Exposure | Mentorship from Industry Leaders",
+    "responsibilities": [],
+    "perks": [
+      "Mentorship"
+    ],
+    "tags": [
+      "ai",
+      "aws",
+      "css",
+      "development",
+      "devops",
+      "figma",
+      "intern",
+      "remote",
+      "software"
+    ],
+    "source": "letsintern",
+    "isActive": true,
+    "createdAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "updatedAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    }
+  },
+  {
+    "_id": {
+      "$oid": "6f15121f00cd9ec94e4cadc4"
+    },
+    "name": "Electric Vehicle Design Internship 2026",
+    "company": "Electric Vehicle Design Internship",
+    "applyLink": "https://letsintern.in/electric-vehicle-design-internship/",
+    "datePublished": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "deadlineDate": null,
+    "country": "India",
+    "state": "",
+    "city": "",
+    "isRemote": true,
+    "stipend": {
+      "type": "unpaid",
+      "amount": 0,
+      "currency": "INR",
+      "period": "monthly"
+    },
+    "duration": {
+      "value": 6,
+      "unit": "months"
+    },
+    "skills": [
+      "Ai",
+      "Aws",
+      "Devops",
+      "Java",
+      "Python",
+      "Sql",
+      "Wordpress"
+    ],
+    "degree": [
+      "B.Tech",
+      "M.Tech"
+    ],
+    "field": [
+      "Design"
+    ],
+    "experienceRequired": {
+      "min": 0,
+      "max": 0,
+      "unit": "months"
+    },
+    "openings": 1,
+    "summary": "The Electric Vehicle Design Internship is a career-focused, hands-on training program designed for students and freshers who want to build a strong future in the EV and automotive industry.",
+    "responsibilities": [],
+    "perks": [],
+    "tags": [
+      "ai",
+      "aws",
+      "development",
+      "devops",
+      "intern",
+      "java",
+      "python",
+      "remote",
+      "software"
+    ],
+    "source": "letsintern",
+    "isActive": true,
+    "createdAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "updatedAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    }
+  },
+  {
+    "_id": {
+      "$oid": "9f42fe24c42611bba7cc0e2a"
+    },
+    "name": "Embedded Systems Internship",
+    "company": "• Share",
+    "applyLink": "https://letsintern.in/embedded-systems-internship-live-projects/",
+    "datePublished": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "deadlineDate": null,
+    "country": "India",
+    "state": "",
+    "city": "",
+    "isRemote": true,
+    "stipend": {
+      "type": "paid",
+      "amount": 18000,
+      "currency": "INR",
+      "period": "monthly"
+    },
+    "duration": {
+      "value": 6,
+      "unit": "months"
+    },
+    "skills": [
+      "Ai",
+      "Aws",
+      "Devops",
+      "Git",
+      "Java",
+      "Mongodb",
+      "Node",
+      "Python",
+      "React",
+      "Sql",
+      "Wordpress"
+    ],
+    "degree": [
+      "B.Tech",
+      "M.Tech"
+    ],
+    "field": [],
+    "experienceRequired": {
+      "min": 0,
+      "max": 0,
+      "unit": "months"
+    },
+    "openings": 1,
+    "summary": "Live Internship | Verified Certificates | Client-Based Project Exposure | Mentorship from Industry Leaders",
+    "responsibilities": [],
+    "perks": [
+      "Mentorship"
+    ],
+    "tags": [
+      "ai",
+      "aws",
+      "development",
+      "devops",
+      "git",
+      "intern",
+      "java",
+      "remote",
+      "software"
+    ],
+    "source": "letsintern",
+    "isActive": true,
+    "createdAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "updatedAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    }
+  },
+  {
+    "_id": {
+      "$oid": "f02a41cc5387cc17a01ccb07"
+    },
+    "name": "Data Science Internship",
+    "company": "Digital Marketing",
+    "applyLink": "https://letsintern.in/digital-marketing-with-ai-internship/",
+    "datePublished": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "deadlineDate": null,
+    "country": "India",
+    "state": "",
+    "city": "",
+    "isRemote": true,
+    "stipend": {
+      "type": "performance_based",
+      "amount": 0,
+      "currency": "INR",
+      "period": "monthly"
+    },
+    "duration": {
+      "value": 6,
+      "unit": "months"
+    },
+    "skills": [
+      "Ai",
+      "Aws",
+      "Canva",
+      "Devops",
+      "Excel",
+      "Java",
+      "Mongodb",
+      "Node",
+      "Python",
+      "React",
+      "Sql",
+      "Wordpress"
+    ],
+    "degree": [
+      "B.Tech"
+    ],
+    "field": [
+      "Science"
+    ],
+    "experienceRequired": {
+      "min": 0,
+      "max": 0,
+      "unit": "months"
+    },
+    "openings": 1,
+    "summary": "Limited Seats Available — Apply Before Registrations Close",
+    "responsibilities": [],
+    "perks": [],
+    "tags": [
+      "ai",
+      "aws",
+      "canva",
+      "development",
+      "devops",
+      "excel",
+      "intern",
+      "remote",
+      "software"
+    ],
+    "source": "letsintern",
+    "isActive": true,
+    "createdAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "updatedAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    }
+  },
+  {
+    "_id": {
+      "$oid": "59adea92a0085bd2b101ac25"
+    },
+    "name": "Full Stack Web Development with AI Internship",
+    "company": "• Share",
+    "applyLink": "https://letsintern.in/full-stack-web-developer-intern/",
+    "datePublished": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "deadlineDate": null,
+    "country": "India",
+    "state": "",
+    "city": "",
+    "isRemote": true,
+    "stipend": {
+      "type": "paid",
+      "amount": 16000,
+      "currency": "INR",
+      "period": "monthly"
+    },
+    "duration": {
+      "value": 6,
+      "unit": "months"
+    },
+    "skills": [
+      "Ai",
+      "Aws",
+      "Css",
+      "Devops",
+      "Figma",
+      "Git",
+      "Html",
+      "Java",
+      "Javascript",
+      "Machine learning",
+      "Mongodb",
+      "Mysql",
+      "Node",
+      "Python",
+      "React",
+      "Sql",
+      "Wordpress"
+    ],
+    "degree": [
+      "M.Tech"
+    ],
+    "field": [],
+    "experienceRequired": {
+      "min": 0,
+      "max": 0,
+      "unit": "months"
+    },
+    "openings": 1,
+    "summary": "Internship with Performance-Based Stipend + Live Client Projects | Stipend Performance Based",
+    "responsibilities": [],
+    "perks": [
+      "Stipend"
+    ],
+    "tags": [
+      "ai",
+      "aws",
+      "css",
+      "development",
+      "devops",
+      "figma",
+      "intern",
+      "remote",
+      "software"
+    ],
+    "source": "letsintern",
+    "isActive": true,
+    "createdAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "updatedAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    }
+  },
+  {
+    "_id": {
+      "$oid": "8af7f53bcce263dbfd01cab0"
+    },
+    "name": "Inside Sales Intern – E-Commerce (Seller Onboarding - WFH",
+    "company": "HiWi Forex Transaction Services Pvt. Ltd.",
+    "applyLink": "https://letsintern.in/inside-sales-intern-e-commerce-seller-onboarding-wfh-full-time/",
+    "datePublished": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "deadlineDate": null,
+    "country": "India",
+    "state": "",
+    "city": "",
+    "isRemote": true,
+    "stipend": {
+      "type": "paid",
+      "amount": 10000,
+      "currency": "INR",
+      "period": "monthly"
+    },
+    "duration": {
+      "value": 3,
+      "unit": "months"
+    },
+    "skills": [],
+    "degree": [
+      "M.Tech"
+    ],
+    "field": [
+      "Commerce"
+    ],
+    "experienceRequired": {
+      "min": 0,
+      "max": 0,
+      "unit": "months"
+    },
+    "openings": 1,
+    "summary": "Job Title : Inside Sales Intern – E-Commerce (Seller Onboarding - WFH | Full Time)",
+    "responsibilities": [],
+    "perks": [
+      "Work from home"
+    ],
+    "tags": [
+      "bd",
+      "intern",
+      "remote",
+      "sales"
+    ],
+    "source": "letsintern",
+    "isActive": true,
+    "createdAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "updatedAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    }
+  },
+  {
+    "_id": {
+      "$oid": "ef3e2d49d6670b6dde65c3c8"
+    },
+    "name": "Graphic Designer -",
+    "company": "Kreative Events",
+    "applyLink": "https://letsintern.in/graphic-designer/",
+    "datePublished": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "deadlineDate": null,
+    "country": "India",
+    "state": "Chandigarh",
+    "city": "Chandigarh",
+    "isRemote": false,
+    "stipend": {
+      "type": "paid",
+      "amount": 30000,
+      "currency": "INR",
+      "period": "monthly"
+    },
+    "duration": {
+      "value": 0,
+      "unit": "months"
+    },
+    "skills": [
+      "Canva",
+      "Illustrator",
+      "Photoshop"
+    ],
+    "degree": [],
+    "field": [
+      "Design"
+    ],
+    "experienceRequired": {
+      "min": 0,
+      "max": 0,
+      "unit": "months"
+    },
+    "openings": 1,
+    "summary": "We’re Hiring: Graphic Designer (2–3 Years Experience)",
+    "responsibilities": [],
+    "perks": [],
+    "tags": [
+      "canva",
+      "design",
+      "illustrator",
+      "photoshop"
+    ],
+    "source": "letsintern",
+    "isActive": true,
+    "createdAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "updatedAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    }
+  },
+  {
+    "_id": {
+      "$oid": "bd81a13e9a83fec36e1fe578"
+    },
+    "name": "Inside Sales Executive -",
+    "company": "PEL SOFTLABS PRIVATE LIMITED )",
+    "applyLink": "https://letsintern.in/inside-sales-executive-2/",
+    "datePublished": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "deadlineDate": null,
+    "country": "India",
+    "state": "",
+    "city": "",
+    "isRemote": true,
+    "stipend": {
+      "type": "paid",
+      "amount": 40000,
+      "currency": "INR",
+      "period": "monthly"
+    },
+    "duration": {
+      "value": 0,
+      "unit": "months"
+    },
+    "skills": [],
+    "degree": [],
+    "field": [],
+    "experienceRequired": {
+      "min": 0,
+      "max": 0,
+      "unit": "months"
+    },
+    "openings": 1,
+    "summary": "Job Title : Inside Sales Executive (Company: PEL SOFTLABS PRIVATE LIMITED )",
+    "responsibilities": [],
+    "perks": [],
+    "tags": [
+      "marketing",
+      "remote"
+    ],
+    "source": "letsintern",
+    "isActive": true,
+    "createdAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "updatedAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    }
+  },
+  {
+    "_id": {
+      "$oid": "ca7c8aa89f751eefd41d671c"
+    },
+    "name": "Telecalling-EduJunior -",
+    "company": "EduJunior)",
+    "applyLink": "https://letsintern.in/telecalling-edujunior/",
+    "datePublished": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "deadlineDate": null,
+    "country": "India",
+    "state": "",
+    "city": "",
+    "isRemote": true,
+    "stipend": {
+      "type": "paid",
+      "amount": 1000,
+      "currency": "INR",
+      "period": "monthly"
+    },
+    "duration": {
+      "value": 0,
+      "unit": "months"
+    },
+    "skills": [],
+    "degree": [
+      "M.Tech"
+    ],
+    "field": [],
+    "experienceRequired": {
+      "min": 0,
+      "max": 0,
+      "unit": "months"
+    },
+    "openings": 1,
+    "summary": "EduJunior is looking for enthusiastic and confident college students for a part-time telecalling internship. This role is perfect for students who want to gain real-world communication and sales experience while working flexibly.",
+    "responsibilities": [],
+    "perks": [],
+    "tags": [
+      "marketing",
+      "remote"
+    ],
+    "source": "letsintern",
+    "isActive": true,
+    "createdAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "updatedAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    }
+  },
+  {
+    "_id": {
+      "$oid": "20bc87c5ac33c4f2ef0a6a1f"
+    },
+    "name": "HR Intern -",
+    "company": "RPR Data Services Pvt. Ltd.",
+    "applyLink": "https://letsintern.in/hr-intern/",
+    "datePublished": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "deadlineDate": null,
+    "country": "India",
+    "state": "Maharashtra",
+    "city": "Nagpur",
+    "isRemote": false,
+    "stipend": {
+      "type": "unpaid",
+      "amount": 0,
+      "currency": "INR",
+      "period": "monthly"
+    },
+    "duration": {
+      "value": 0,
+      "unit": "months"
+    },
+    "skills": [],
+    "degree": [
+      "M.Tech"
+    ],
+    "field": [],
+    "experienceRequired": {
+      "min": 0,
+      "max": 0,
+      "unit": "months"
+    },
+    "openings": 1,
+    "summary": "We are looking for a motivated Human Resources Intern to support our HR and recruitment operations, primarily focused on hiring Paid and UnPaid internship.",
+    "responsibilities": [],
+    "perks": [],
+    "tags": [
+      "hr",
+      "intern"
+    ],
+    "source": "letsintern",
+    "isActive": true,
+    "createdAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "updatedAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    }
+  },
+  {
+    "_id": {
+      "$oid": "e59e70381379dbf813272049"
+    },
+    "name": "App Promotion Specialist / Digital Marketing Executive -",
+    "company": "DREAMSELLLINE E-COMMERCE PRIVATE LIMITED",
+    "applyLink": "https://letsintern.in/app-promotion-specialist-digital-marketing-executive/",
+    "datePublished": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "deadlineDate": null,
+    "country": "India",
+    "state": "",
+    "city": "",
+    "isRemote": true,
+    "stipend": {
+      "type": "paid",
+      "amount": 35000,
+      "currency": "INR",
+      "period": "monthly"
+    },
+    "duration": {
+      "value": 0,
+      "unit": "months"
+    },
+    "skills": [
+      "Android"
+    ],
+    "degree": [],
+    "field": [
+      "Marketing"
+    ],
+    "experienceRequired": {
+      "min": 0,
+      "max": 0,
+      "unit": "months"
+    },
+    "openings": 1,
+    "summary": "Job Title : App Promotion Specialist / Digital Marketing Executive",
+    "responsibilities": [],
+    "perks": [],
+    "tags": [
+      "android",
+      "marketing",
+      "remote"
+    ],
+    "source": "letsintern",
+    "isActive": true,
+    "createdAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "updatedAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    }
+  },
+  {
+    "_id": {
+      "$oid": "20e93aa437a4484c153caf70"
+    },
+    "name": "Student Community Promoter -",
+    "company": "DREAMSELLLINE E-COMMERCE PRIVATE LIMITED",
+    "applyLink": "https://letsintern.in/student-community-promoter/",
+    "datePublished": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "deadlineDate": null,
+    "country": "India",
+    "state": "",
+    "city": "",
+    "isRemote": true,
+    "stipend": {
+      "type": "paid",
+      "amount": 35000,
+      "currency": "INR",
+      "period": "monthly"
+    },
+    "duration": {
+      "value": 0,
+      "unit": "months"
+    },
+    "skills": [],
+    "degree": [],
+    "field": [],
+    "experienceRequired": {
+      "min": 0,
+      "max": 0,
+      "unit": "months"
+    },
+    "openings": 1,
+    "summary": "Share information in student groups, local community groups, and campus groups.",
+    "responsibilities": [],
+    "perks": [],
+    "tags": [
+      "marketing",
+      "remote"
+    ],
+    "source": "letsintern",
+    "isActive": true,
+    "createdAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "updatedAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    }
+  },
+  {
+    "_id": {
+      "$oid": "41aa4ec443fa36d956d19985"
+    },
+    "name": "Talent Coordinator (Japan) -",
+    "company": "HeliT Consulting",
+    "applyLink": "https://letsintern.in/talent-coordinator-japan-2/",
+    "datePublished": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "deadlineDate": null,
+    "country": "India",
+    "state": "",
+    "city": "",
+    "isRemote": true,
+    "stipend": {
+      "type": "paid",
+      "amount": 10000,
+      "currency": "INR",
+      "period": "monthly"
+    },
+    "duration": {
+      "value": 6,
+      "unit": "months"
+    },
+    "skills": [
+      "Ai"
+    ],
+    "degree": [
+      "B.Tech",
+      "M.Tech"
+    ],
+    "field": [],
+    "experienceRequired": {
+      "min": 0,
+      "max": 0,
+      "unit": "months"
+    },
+    "openings": 1,
+    "summary": "HeliT Consulting is a specialized recruitment support firm helping Japan-based companies and recruitment agencies hire bilingual talent across cybersecurity, cloud, data, and AI/ML roles.",
+    "responsibilities": [],
+    "perks": [],
+    "tags": [
+      "ai",
+      "hr",
+      "remote"
+    ],
+    "source": "letsintern",
+    "isActive": true,
+    "createdAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "updatedAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    }
+  },
+  {
+    "_id": {
+      "$oid": "4e7c3a7e2697542a46366814"
+    },
+    "name": "Group Growth Executive -",
+    "company": "DREAMSELLLINE E-COMMERCE PRIVATE LIMITED",
+    "applyLink": "https://letsintern.in/group-growth-executive-2/",
+    "datePublished": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "deadlineDate": null,
+    "country": "India",
+    "state": "",
+    "city": "",
+    "isRemote": true,
+    "stipend": {
+      "type": "paid",
+      "amount": 35000,
+      "currency": "INR",
+      "period": "monthly"
+    },
+    "duration": {
+      "value": 0,
+      "unit": "months"
+    },
+    "skills": [],
+    "degree": [],
+    "field": [],
+    "experienceRequired": {
+      "min": 0,
+      "max": 0,
+      "unit": "months"
+    },
+    "openings": 1,
+    "summary": "Currently enrolled university students / Recent graduates",
+    "responsibilities": [],
+    "perks": [],
+    "tags": [
+      "marketing",
+      "remote"
+    ],
+    "source": "letsintern",
+    "isActive": true,
+    "createdAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "updatedAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    }
+  },
+  {
+    "_id": {
+      "$oid": "632385d11a6920a144b0fdeb"
+    },
+    "name": "Student/Youth Community Administrator -",
+    "company": "DREAMSELLLINE E-COMMERCE PRIVATE LIMITED",
+    "applyLink": "https://letsintern.in/student-youth-community-administrator/",
+    "datePublished": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "deadlineDate": null,
+    "country": "India",
+    "state": "",
+    "city": "",
+    "isRemote": true,
+    "stipend": {
+      "type": "paid",
+      "amount": 35000,
+      "currency": "INR",
+      "period": "monthly"
+    },
+    "duration": {
+      "value": 0,
+      "unit": "months"
+    },
+    "skills": [],
+    "degree": [],
+    "field": [],
+    "experienceRequired": {
+      "min": 0,
+      "max": 0,
+      "unit": "months"
+    },
+    "openings": 1,
+    "summary": "Preference given to those with class groups, student groups, or friend groups",
+    "responsibilities": [],
+    "perks": [],
+    "tags": [
+      "marketing",
+      "remote"
+    ],
+    "source": "letsintern",
+    "isActive": true,
+    "createdAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    },
+    "updatedAt": {
+      "$date": "2026-05-05T00:00:00.000Z"
+    }
+  }
+]

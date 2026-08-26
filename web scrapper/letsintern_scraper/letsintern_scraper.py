@@ -19,6 +19,10 @@ import json
 import time
 import logging
 from typing import Optional
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from format_internship import format_and_save
 
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -458,22 +462,62 @@ def parse_detail_page(driver: webdriver.Chrome, url: str) -> Optional[dict]:
                 description = line
                 break
 
+        # ── RESPONSIBILITIES ───────────────────────────────────────────────────
+        responsibilities = []
+        numbered = re.findall(
+            r"(?:^|\n)\s*\d+[\.\)]\s*(.+?)(?=\n\s*\d+[\.\)]|\Z)",
+            text, re.DOTALL
+        )
+        for r_item in numbered:
+            r_item = re.sub(r"\s+", " ", r_item).strip()
+            if 10 < len(r_item) < 300:
+                responsibilities.append(r_item)
+        responsibilities = responsibilities[:8]
+
+        # ── PERKS ─────────────────────────────────────────────────────────────
+        PERK_PATTERNS_LOCAL = [
+            (r"\bcertificate\b", "Certificate"),
+            (r"\bletter of recommendation\b|\blor\b", "Letter of Recommendation"),
+            (r"\bflexible hours?\b|\bflexible timing\b", "Flexible hours"),
+            (r"\b5\s*days?/?\s*week\b", "5 days/week"),
+            (r"\bwork from home\b|\bwfh\b|\bremote\b", "Work from home"),
+            (r"\bpre-placement\s*offer\b|\bppo\b", "Pre-Placement Offer"),
+            (r"\bmentorship\b", "Mentorship"),
+            (r"\bperformance\s*bonus\b|\bincentive\b", "Performance bonus"),
+        ]
+        perks = []
+        lower_text = text.lower()
+        for pattern, perk_name in PERK_PATTERNS_LOCAL:
+            if re.search(pattern, lower_text) and perk_name not in perks:
+                perks.append(perk_name)
+
+        # ── OPENINGS ──────────────────────────────────────────────────────────
+        openings = 1
+        om = re.search(r"(\d+)\s*(?:opening|position|seat|vacanc)s?", text, re.IGNORECASE)
+        if om:
+            n = int(om.group(1))
+            if 1 <= n <= 500:
+                openings = n
+
         # ── SKILLS & ROLE ─────────────────────────────────────────────────────
         skills = extract_skills(f"{title} {description} {text}")
         role   = classify_role(title, text)
 
         return {
-            "title":       title,
-            "company":     company,
-            "location":    location,
-            "stipend":     stipend,
-            "duration":    duration,
-            "start_date":  start_date,
-            "apply_by":    apply_by,
-            "skills":      skills,
-            "type":        role,
-            "link":        url,
-            "description": description,
+            "title":            title,
+            "company":          company,
+            "location":         location,
+            "stipend":          stipend,
+            "duration":         duration,
+            "start_date":       start_date,
+            "apply_by":         apply_by,
+            "skills":           skills,
+            "type":             role,
+            "link":             url,
+            "description":      description,
+            "responsibilities": responsibilities,
+            "perks":            perks,
+            "openings":         openings,
         }
 
     except Exception as e:
@@ -541,16 +585,6 @@ def save_json(items: list, path: str):
         log.warning("Could not save %s: %s", path, e)
 
 
-def save_csv(items: list, path: str):
-    try:
-        import pandas as pd
-        df = pd.DataFrame(items)
-        df.to_csv(path, index=False, encoding="utf-8-sig")
-        log.info("Saved %d items -> CSV %s", len(items), path)
-    except Exception as e:
-        log.warning("Could not save CSV %s: %s", path, e)
-
-
 # ============================================================================
 #  MAIN
 # ============================================================================
@@ -583,12 +617,16 @@ def main():
     for role, cnt in Counter(i.get("type", "Other") for i in all_items).most_common():
         log.info("  %-30s %d", role, cnt)
 
-    # Save final JSON and CSV
-    save_json(all_items, OUTPUT_FINAL)
-    save_csv(all_items, "letsintern_internships.csv")
-    save_csv(all_items, "internships.csv")
-    print(f"\nTotal internships scraped: {len(all_items)}")
-    return all_items
+    # Save formatted (standardized MongoDB format)
+    formatted = format_and_save(
+        all_items,
+        source="letsintern",
+        output_path=OUTPUT_FINAL,
+    )
+    log.info("Saved %d formatted internships → %s", len(formatted), OUTPUT_FINAL)
+
+    print(f"\nTotal internships scraped: {len(formatted)}")
+    return formatted
 
 
 if __name__ == "__main__":

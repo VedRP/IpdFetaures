@@ -10,6 +10,7 @@ __pycache__/
 .wdm/
 data/
 scrapers/**/__pycache__/
+web scrapper/**/__pycache__/
 scrapers/**/*.json
 *.csv
 fake_internship_detection_dataset.csv
