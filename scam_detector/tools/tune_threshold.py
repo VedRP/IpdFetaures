@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
+import numpy as np
 import pandas as pd
 
 from scam_detector.config import Config, cfg as default_cfg
@@ -55,35 +56,35 @@ def compute_pr_curve(
     if len(y_true) != len(y_scores):
         raise ValueError(f"Mismatch between y_true ({len(y_true)}) and y_scores ({len(y_scores)})")
 
-    evaluations: list[ThresholdEvaluation] = []
-    thresholds = [round(t, 2) for t in list(pd.Series(range(0, int(100 / step) + 1)) * step)]
+    y_t = np.array(y_true, dtype=np.int32)
+    y_s = np.array(y_scores, dtype=np.float32)
 
-    y_t = [int(v) for v in y_true]
-    y_s = [float(s) for s in y_scores]
+    total_positives = int(np.sum(y_t == 1))
+    total_negatives = int(np.sum(y_t == 0))
+
+    thresholds = [round(t, 2) for t in np.arange(0.0, 100.0 + step, step)]
+    evaluations: list[ThresholdEvaluation] = []
+
+    pos_mask = (y_t == 1)
+    neg_mask = (y_t == 0)
 
     for th in thresholds:
-        tp = fp = tn = fn = 0
-        for label, score in zip(y_t, y_s):
-            pred = 1 if score >= th else 0
-            if pred == 1 and label == 1:
-                tp += 1
-            elif pred == 1 and label == 0:
-                fp += 1
-            elif pred == 0 and label == 0:
-                tn += 1
-            else:
-                fn += 1
+        pred_pos = (y_s >= th)
+        tp = int(np.sum(pred_pos & pos_mask))
+        fp = int(np.sum(pred_pos & neg_mask))
+        tn = total_negatives - fp
+        fn = total_positives - tp
 
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        recall = tp / total_positives if total_positives > 0 else 0.0
         f1 = (2 * precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
 
         evaluations.append(
             ThresholdEvaluation(
                 threshold=th,
-                precision=round(precision, 4),
-                recall=round(recall, 4),
-                f1_score=round(f1, 4),
+                precision=round(float(precision), 4),
+                recall=round(float(recall), 4),
+                f1_score=round(float(f1), 4),
                 tp=tp,
                 fp=fp,
                 tn=tn,
@@ -144,6 +145,12 @@ def load_labeled_dataset(
     records: list[dict[str, Any]] = []
     if path.suffix == ".csv":
         df = pd.read_csv(path)
+        label_col = next((c for c in ("is_fake_posting", "label", "is_scam") if c in df.columns), None)
+        score_col = next((c for c in ("fraud_score", "scam_score") if c in df.columns), None)
+        if label_col and score_col:
+            y_t = df[label_col].astype(int).tolist()
+            y_s = df[score_col].astype(float).tolist()
+            return y_t, y_s
         records = df.to_dict(orient="records")
     elif path.suffix in (".jsonl", ".ndjson"):
         with path.open(encoding="utf-8") as fh:
@@ -175,6 +182,8 @@ def load_labeled_dataset(
             label = int(r["label"])
         elif "is_scam" in r and r["is_scam"] is not None:
             label = 1 if bool(r["is_scam"]) else 0
+        elif "is_fake_posting" in r and r["is_fake_posting"] is not None:
+            label = int(r["is_fake_posting"])
         elif "reviewer_decision" in r and r["reviewer_decision"] in _LABEL_MAP:
             label = _LABEL_MAP[r["reviewer_decision"]]
 
@@ -190,8 +199,41 @@ def load_labeled_dataset(
             if score <= 1.0 and score > 0.0:
                 score *= 100.0
             y_scores.append(score)
+        elif "fraud_score" in r and r["fraud_score"] is not None:
+            score = float(r["fraud_score"])
+            if score <= 1.0 and score > 0.0:
+                score *= 100.0
+            y_scores.append(score)
         else:
-            need_scoring_records.append(r)
+            # Map Kaggle columns if needed for raw pipeline scoring
+            mapped_r = r
+            if "internship_title" in r or "company_name" in r:
+                summary_parts = []
+                if r.get("payment_required") == 1 or (r.get("registration_fee") or 0) > 0:
+                    summary_parts.append(f"Upfront registration fee required: ₹{r.get('registration_fee', 0)}. Security deposit payment mandated.")
+                if r.get("fake_certificate_offer") == 1:
+                    summary_parts.append("Guaranteed certificate offer upon fee payment.")
+                if r.get("vague_description_score", 0) > 40:
+                    summary_parts.append("Generic online work from home role with vague details.")
+                if r.get("phishing_language_score", 0) > 30:
+                    summary_parts.append("Urgent hiring! Send bank details and ID proof immediately via WhatsApp.")
+
+                summary = " ".join(summary_parts) if summary_parts else f"Internship opportunity for {r.get('internship_title', 'Role')} in {r.get('industry', 'Industry')}."
+
+                mapped_r = {
+                    "_id": f"{r.get('posting_date', '')}_{r.get('company_name', '')}_{i}",
+                    "name": r.get("internship_title", "Intern"),
+                    "company": r.get("company_name", "Company"),
+                    "datePublished": r.get("posting_date", ""),
+                    "city": r.get("location", ""),
+                    "isRemote": (str(r.get("work_mode", "")).lower() == "remote"),
+                    "stipend": r.get("stipend"),
+                    "summary": summary,
+                    "responsibilities": summary,
+                    "applyLink": f"https://{str(r.get('company_name', '')).lower().replace(' ', '')}.com/jobs" if r.get("website_available") == 1 else "http://free-email-apply-form.biz",
+                    "source": "kaggle_internship",
+                }
+            need_scoring_records.append(mapped_r)
             need_scoring_indices.append(len(y_true) - 1)
             y_scores.append(0.0)
 
@@ -250,9 +292,9 @@ def generate_tuning_report(
 ) -> str:
     """Generate human-readable evaluation report."""
     lines = [
-        "════════════════════════════════════════════════════════════",
+        "============================================================",
         "  SCAM DETECTOR — THRESHOLD TUNING REPORT",
-        "════════════════════════════════════════════════════════════",
+        "============================================================",
         f"  Total Labeled Samples : {total_samples}",
         f"  Target Mode           : "
         + (
@@ -262,23 +304,26 @@ def generate_tuning_report(
             if target_rec is not None
             else "Maximize F1 Score"
         ),
-        "────────────────────────────────────────────────────────────",
+        "------------------------------------------------------------",
         f"  Recommended Block Threshold : {eval_res.threshold:.2f} / 100",
         f"  Precision                   : {eval_res.precision:.4f} ({eval_res.precision * 100:.2f}%)",
         f"  Recall                      : {eval_res.recall:.4f} ({eval_res.recall * 100:.2f}%)",
         f"  F1 Score                    : {eval_res.f1_score:.4f}",
-        "────────────────────────────────────────────────────────────",
+        "------------------------------------------------------------",
         "  Confusion Matrix:",
         f"    True Positives (TP)  : {eval_res.tp}",
         f"    False Positives (FP) : {eval_res.fp}",
         f"    True Negatives (TN)  : {eval_res.tn}",
         f"    False Negatives (FN) : {eval_res.fn}",
-        "════════════════════════════════════════════════════════════",
+        "============================================================",
     ]
     return "\n".join(lines)
 
 
 def main() -> None:
+    import sys
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser(description="Tune scam_score decision thresholds on a labeled dataset")
     parser.add_argument("--dataset", type=str, required=True, help="Path to labeled dataset (JSON, JSONL, or CSV)")

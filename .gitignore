@@ -1,5 +1,6 @@
 .env
 checkpoint_internships.json
+checkpoint_*.json
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -12,4 +13,9 @@ scrapers/**/__pycache__/
 scrapers/**/*.json
 *.csv
 fake_internship_detection_dataset.csv
-
+*.sqlite
+*.log
+run_kaggle_test.py
+test_kaggle_internship.py
+output_*.json
+*_scored.json

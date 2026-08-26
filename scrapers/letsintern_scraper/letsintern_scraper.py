@@ -541,6 +541,16 @@ def save_json(items: list, path: str):
         log.warning("Could not save %s: %s", path, e)
 
 
+def save_csv(items: list, path: str):
+    try:
+        import pandas as pd
+        df = pd.DataFrame(items)
+        df.to_csv(path, index=False, encoding="utf-8-sig")
+        log.info("Saved %d items -> CSV %s", len(items), path)
+    except Exception as e:
+        log.warning("Could not save CSV %s: %s", path, e)
+
+
 # ============================================================================
 #  MAIN
 # ============================================================================
@@ -573,8 +583,10 @@ def main():
     for role, cnt in Counter(i.get("type", "Other") for i in all_items).most_common():
         log.info("  %-30s %d", role, cnt)
 
-    # Save final (same as raw since no dedup needed — each URL is unique)
+    # Save final JSON and CSV
     save_json(all_items, OUTPUT_FINAL)
+    save_csv(all_items, "letsintern_internships.csv")
+    save_csv(all_items, "internships.csv")
     print(f"\nTotal internships scraped: {len(all_items)}")
     return all_items
 
