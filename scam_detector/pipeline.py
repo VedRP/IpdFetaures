@@ -158,43 +158,76 @@ def build_peer_group(
     record: dict[str, Any],
     all_records: list[dict[str, Any]],
     *,
-    min_jaccard: float = _PEER_JACCARD_MIN,
+    min_peer_group_size: int = 2,
 ) -> list[dict[str, Any]]:
     """
-    Peer group for stipend / openings z-scores conditioned on
-    (role_category, city_tier, company_size_tier).
+    Peer group for stipend / openings z-scores conditioned in priority order:
+    1. Subcategory + Remote status + City tier (if city tier is reliable/known)
+    2. Subcategory + Remote status
+    3. Subcategory
+    4. Broad category + Remote status
+    5. Broad category
+
+    Returns [] if no priority level yields >= min_peer_group_size records.
     """
     from scam_detector.features.stipend_features import (
-        get_role_category,
+        get_role_subcategory,
+        get_broad_category,
+        get_remote_status,
         get_city_tier,
-        get_company_size_tier,
     )
 
-    target_role = get_role_category(record)
-    target_city = get_city_tier(record)
-    target_size = get_company_size_tier(record)
+    subcat = get_role_subcategory(record)
+    broad_cat = get_broad_category(subcat)
+    remote_st = get_remote_status(record)
+    city_t = get_city_tier(record)
 
-    peers = [
+    # 1. Subcategory + Remote status + City tier
+    if city_t not in ("unknown", ""):
+        p1 = [
+            r for r in all_records
+            if get_role_subcategory(r) == subcat
+            and get_remote_status(r) == remote_st
+            and get_city_tier(r) == city_t
+        ]
+        if len(p1) >= min_peer_group_size:
+            return p1
+
+    # 2. Subcategory + Remote status
+    p2 = [
         r for r in all_records
-        if get_role_category(r) == target_role
-        and get_city_tier(r) == target_city
-        and get_company_size_tier(r) == target_size
+        if get_role_subcategory(r) == subcat
+        and get_remote_status(r) == remote_st
     ]
+    if len(p2) >= min_peer_group_size:
+        return p2
 
-    if len(peers) < 2:
-        peers = [
-            r for r in all_records
-            if get_role_category(r) == target_role
-            and get_city_tier(r) == target_city
-        ]
+    # 3. Subcategory alone
+    p3 = [
+        r for r in all_records
+        if get_role_subcategory(r) == subcat
+    ]
+    if len(p3) >= min_peer_group_size:
+        return p3
 
-    if len(peers) < 2:
-        peers = [
-            r for r in all_records
-            if get_role_category(r) == target_role
-        ]
+    # 4. Broad category + Remote status
+    p4 = [
+        r for r in all_records
+        if get_broad_category(get_role_subcategory(r)) == broad_cat
+        and get_remote_status(r) == remote_st
+    ]
+    if len(p4) >= min_peer_group_size:
+        return p4
 
-    return peers if peers else list(all_records)
+    # 5. Broad category alone
+    p5 = [
+        r for r in all_records
+        if get_broad_category(get_role_subcategory(r)) == broad_cat
+    ]
+    if len(p5) >= min_peer_group_size:
+        return p5
+
+    return []
 
 
 
@@ -276,6 +309,7 @@ def _enrich_feature_vector(
     peer_group: list[dict[str, Any]],
     company_records: list[dict[str, Any]],
     scam_embeddings: Any | None = None,
+    min_peer_group_size: int = 8,
 ) -> FeatureVector:
     """Per-record feature extraction using pre-built corpus structures."""
     raw = remediated.record
@@ -291,7 +325,7 @@ def _enrich_feature_vector(
         raw.get("stipend") or {},
         raw.get("duration") or {},
     )
-    peer_z = stipend_zscore(raw, peer_group)
+    peer_z = stipend_zscore(raw, peer_group, min_peer_group_size=min_peer_group_size)
     contradiction = stipend_perk_consistency_check(raw)
     stipend_val = raw.get("stipend")
     if isinstance(stipend_val, str):
@@ -326,7 +360,7 @@ def _enrich_feature_vector(
     )
 
     completeness = field_completeness_score(raw)
-    oz = openings_zscore(raw, peer_group)
+    oz = openings_zscore(raw, peer_group, min_peer_group_size=min_peer_group_size)
     skills = raw.get("skills") or []
     skills_count = len(skills) if isinstance(skills, list) else 0
     responsibilities = raw.get("responsibilities") or []
@@ -421,10 +455,11 @@ def process_records(
         remediated[i] = RemediatedRecord(record=rec, flags=flags_list[i])
 
     # ── Corpus structures (once) ──────────────────────────────────────────
+    min_peer_size = cfg.rule_thresholds.min_peer_group_size
     neighbors_by_id = _build_duplicate_neighbors(records)
     by_company = _index_by_company(records)
     peer_cache: list[list[dict[str, Any]]] = [
-        build_peer_group(rec, records) for rec in records
+        build_peer_group(rec, records, min_peer_group_size=min_peer_size) for rec in records
     ]
 
     # ── Per-record features (Prompts 2–5) ─────────────────────────────────
@@ -451,6 +486,7 @@ def process_records(
             peer_group=peer_cache[i],
             company_records=company_recs,
             scam_embeddings=scam_embeddings,
+            min_peer_group_size=min_peer_size,
         )
         feature_vectors.append(fv)
 

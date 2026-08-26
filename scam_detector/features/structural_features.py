@@ -92,6 +92,8 @@ _COMPLETENESS_CHECKS: list[tuple[str, Any]] = [
 def openings_zscore(
     record: dict[str, Any],
     peer_group_records: list[dict[str, Any]],
+    *,
+    min_peer_group_size: int = 2,
 ) -> float | None:
     """
     Compute a z-score for this record's ``openings`` count against peers.
@@ -109,13 +111,15 @@ def openings_zscore(
         Internship dict with ``openings`` key (int or None).
     peer_group_records:
         List of comparable internship dicts.
+    min_peer_group_size:
+        Minimum number of valid peer records required to calculate z-score.
 
     Returns
     -------
     float or None
         None when:
         - This record's openings is None/missing
-        - Fewer than 2 peers have non-None openings values
+        - Fewer than ``min_peer_group_size`` peers have non-None openings values
         - All peers have identical openings (σ = 0, would divide by zero)
     """
     own = record.get("openings")
@@ -129,7 +133,7 @@ def openings_zscore(
         if v is not None and isinstance(v, (int, float)):
             peer_vals.append(float(v))
 
-    if len(peer_vals) < 2:
+    if len(peer_vals) < min_peer_group_size:
         return None
 
     mu = statistics.mean(peer_vals)

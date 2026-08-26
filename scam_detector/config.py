@@ -86,6 +86,13 @@ class RuleThresholds(BaseModel):
     mass_openings_zscore_threshold: float = Field(default=2.0, ge=0.0)
     mass_openings_genericity_threshold: float = Field(default=0.65, ge=0.0, le=1.0)
 
+    # Minimum peer group size required to compute stable z-scores
+    min_peer_group_size: int = Field(
+        default=8,
+        ge=2,
+        description="Minimum comparable peer records required to compute z-scores for stipend and openings",
+    )
+
 
 class Thresholds(BaseModel):
     """
