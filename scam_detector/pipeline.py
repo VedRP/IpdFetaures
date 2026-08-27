@@ -437,6 +437,8 @@ def process_records(
         return []
 
     cfg = config or default_cfg
+    from scam_detector.scoring.risk_engine import clear_baselines_cache
+    clear_baselines_cache()
     n = len(raw_records)
     log.info("Processing %d records", n)
 
@@ -451,6 +453,12 @@ def process_records(
             rec = {**rec, "_id": f"pipeline-row-{i}"}
         # Add flags to record so downstream steps can access flags easily
         rec = {**rec, "_flags": flags_list[i]}
+
+        # Precompute subcategory and city tier to avoid O(N^2) evaluation overhead
+        from scam_detector.features.stipend_features import get_role_subcategory, get_city_tier
+        rec["role_subcategory"] = get_role_subcategory(rec)
+        rec["city_tier"] = get_city_tier(rec)
+
         records[i] = rec
         remediated[i] = RemediatedRecord(record=rec, flags=flags_list[i])
 
@@ -543,7 +551,7 @@ def process_records(
             flags=rem.flags,
         )
         rule_result = rules_engine.run(rule_input)
-        confidence = compute_confidence_score(rem, fv)
+        confidence = compute_confidence_score(rem, fv, config=cfg)
         result: ScamScoreResult = risk_engine.score_record(
             record=rem,
             rule_result=rule_result,
@@ -569,7 +577,84 @@ def process_records(
         bucket_counts.get("review", 0),
         bucket_counts.get("block", 0),
     )
+
+    # ── Update per-source baselines ────────────────────────────────────────
+    if cfg.confidence.enable_source_conditioning:
+        try:
+            update_source_baselines(raw_records, feature_vectors, outputs, cfg.confidence.source_baseline_path)
+        except Exception as exc:
+            log.warning("Failed to update source baselines: %s", exc)
+
     return outputs
+
+
+def update_source_baselines(
+    raw_records: list[dict[str, Any]],
+    feature_vectors: list[FeatureVector],
+    outputs: list[dict[str, Any]],
+    path: str,
+) -> None:
+    import statistics
+    from scam_detector.scoring.risk_engine import clear_baselines_cache
+
+    p = Path(path)
+    baselines = {}
+    if p.exists():
+        try:
+            with p.open("r", encoding="utf-8") as fh:
+                baselines = json.load(fh)
+        except Exception:
+            pass
+
+    # Group records by source
+    by_source = defaultdict(list)
+    for i, raw in enumerate(raw_records):
+        source = raw.get("source") or "unknown"
+        completeness = feature_vectors[i].structural.field_completeness
+        scam_score = outputs[i]["scam_score"]
+        by_source[source].append((completeness, scam_score))
+
+    for source, data in by_source.items():
+        comp_list = [d[0] for d in data]
+        score_list = [d[1] for d in data]
+
+        source_data = baselines.get(
+            source,
+            {
+                "count": 0,
+                "mean_completeness": 0.0,
+                "mean_scam_score": 0.0,
+                "recent_completeness": [],
+                "recent_scam_scores": [],
+            },
+        )
+
+        # Update lists
+        source_data["recent_completeness"].extend(comp_list)
+        source_data["recent_scam_scores"].extend(score_list)
+
+        # Cap rolling history at 5000 items
+        if len(source_data["recent_completeness"]) > 5000:
+            source_data["recent_completeness"] = source_data["recent_completeness"][-5000:]
+        if len(source_data["recent_scam_scores"]) > 5000:
+            source_data["recent_scam_scores"] = source_data["recent_scam_scores"][-5000:]
+
+        source_data["count"] = source_data["count"] + len(comp_list)
+        source_data["mean_completeness"] = round(statistics.mean(source_data["recent_completeness"]), 4)
+        source_data["mean_scam_score"] = round(statistics.mean(source_data["recent_scam_scores"]), 4)
+
+        baselines[source] = source_data
+
+    # Save to disk
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with p.open("w", encoding="utf-8") as fh:
+            json.dump(baselines, fh, indent=2)
+    except Exception:
+        pass
+
+    # Invalidate cache
+    clear_baselines_cache()
 
 
 def run_pipeline(

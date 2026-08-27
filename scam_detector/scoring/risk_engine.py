@@ -84,7 +84,49 @@ def _get_nested(obj: Any, *path: str, default: Any = None) -> Any:
     return cur if cur is not None else default
 
 
-def compute_confidence_score(record: Any, features: Any | None = None) -> float:
+_BASELINES_CACHE: dict | None = None
+
+
+def _get_source(record: Any) -> str | None:
+    if record is None:
+        return None
+    if isinstance(record, Mapping):
+        rec_dict = record.get("record")
+        if isinstance(rec_dict, Mapping):
+            return rec_dict.get("source")
+        return record.get("source")
+    if hasattr(record, "record"):
+        rec_val = getattr(record, "record")
+        if isinstance(rec_val, Mapping):
+            return rec_val.get("source")
+        return getattr(rec_val, "source", None)
+    return getattr(record, "source", None)
+
+
+def load_source_baselines(path: str) -> dict:
+    global _BASELINES_CACHE
+    if _BASELINES_CACHE is not None:
+        return _BASELINES_CACHE
+    import json
+    from pathlib import Path
+    p = Path(path)
+    if p.exists():
+        try:
+            with p.open("r", encoding="utf-8") as fh:
+                _BASELINES_CACHE = json.load(fh)
+                return _BASELINES_CACHE
+        except Exception:
+            pass
+    _BASELINES_CACHE = {}
+    return _BASELINES_CACHE
+
+
+def clear_baselines_cache():
+    global _BASELINES_CACHE
+    _BASELINES_CACHE = None
+
+
+def compute_confidence_score(record: Any, features: Any | None = None, config: Config | None = None) -> float:
     """
     Derive a 0–1 confidence score from field completeness and scraper-suspect flags.
 
@@ -92,6 +134,7 @@ def compute_confidence_score(record: Any, features: Any | None = None) -> float:
     mismapping are currently unreliable — when those flags fire, confidence
     must drop so a numeric "clear" is never presented as trustworthy.
     """
+    cfg = config or _default_cfg
     src = features if features is not None else record
 
     completeness = _get_nested(src, "structural", "field_completeness", default=None)
@@ -101,6 +144,18 @@ def compute_confidence_score(record: Any, features: Any | None = None) -> float:
         completeness = record.get("field_completeness")
     if completeness is None:
         completeness = 0.5  # unknown completeness → mid confidence baseline
+
+    # Source-conditioned completeness logic
+    if cfg.confidence.enable_source_conditioning:
+        source = _get_source(record)
+        if source:
+            baselines = load_source_baselines(cfg.confidence.source_baseline_path)
+            source_data = baselines.get(source)
+            if source_data and isinstance(source_data, dict):
+                mean_comp = source_data.get("mean_completeness", 0.0)
+                if mean_comp > 0.0:
+                    target = cfg.confidence.global_completeness_target
+                    completeness = min(1.0, completeness * (target / mean_comp))
 
     confidence = float(max(0.0, min(1.0, completeness)))
 

@@ -293,3 +293,82 @@ class TestSupervisedBlendingAndCalibration:
         )
         assert 0.0 <= result.scam_score <= 100.0
 
+
+class TestSourceConditionedConfidence:
+    def test_unseen_source_fallback(self) -> None:
+        cfg = Config(
+            confidence=ConfidenceConfig(
+                enable_source_conditioning=True,
+                source_baseline_path="nonexistent_baselines_file.json",
+            )
+        )
+        features = FeatureVector(
+            structural=StructuralFeatures(field_completeness=0.50),
+        )
+        score_conditioned = compute_confidence_score(
+            {"source": "new_unseen_source", "flags": {}},
+            features,
+            config=cfg,
+        )
+
+        cfg_disabled = Config(
+            confidence=ConfidenceConfig(
+                enable_source_conditioning=False,
+            )
+        )
+        score_disabled = compute_confidence_score(
+            {"source": "new_unseen_source", "flags": {}},
+            features,
+            config=cfg_disabled,
+        )
+        assert score_conditioned == score_disabled
+
+    def test_existing_source_scaling(self, tmp_path) -> None:
+        import json
+        from scam_detector.scoring.risk_engine import clear_baselines_cache
+        clear_baselines_cache()
+
+        baseline_file = tmp_path / "test_source_baselines.json"
+        baselines = {
+            "unstop": {
+                "mean_completeness": 0.50,
+                "count": 100
+            }
+        }
+        with open(baseline_file, "w", encoding="utf-8") as fh:
+            json.dump(baselines, fh)
+
+        cfg = Config(
+            confidence=ConfidenceConfig(
+                enable_source_conditioning=True,
+                source_baseline_path=str(baseline_file),
+                global_completeness_target=0.75,
+            )
+        )
+        features = FeatureVector(
+            structural=StructuralFeatures(field_completeness=0.50),
+        )
+
+        score_conditioned = compute_confidence_score(
+            {"source": "unstop", "flags": {}},
+            features,
+            config=cfg,
+        )
+
+        cfg_disabled = Config(
+            confidence=ConfidenceConfig(
+                enable_source_conditioning=False,
+            )
+        )
+        score_disabled = compute_confidence_score(
+            {"source": "unstop", "flags": {}},
+            features,
+            config=cfg_disabled,
+        )
+
+        assert score_conditioned > score_disabled
+        assert abs(score_conditioned - 0.60) < 1e-4
+        assert abs(score_disabled - 0.40) < 1e-4
+
+        clear_baselines_cache()
+

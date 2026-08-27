@@ -146,6 +146,18 @@ class ConfidenceConfig(BaseModel):
         le=1.0,
         description="Confidence in [low_below, medium_below) → medium; else high",
     )
+    enable_source_conditioning: bool = Field(
+        default=True,
+        description="Adjust sparse fields penalty relative to per-source baseline completeness.",
+    )
+    source_baseline_path: str = Field(
+        default="source_baselines.json",
+        description="Path to save/load per-source baseline statistics.",
+    )
+    global_completeness_target: float = Field(
+        default=0.75,
+        description="Target reference completeness value to scale against.",
+    )
 
 
 class FeatureFlags(BaseModel):
