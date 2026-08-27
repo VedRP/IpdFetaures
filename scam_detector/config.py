@@ -155,7 +155,7 @@ class ConfidenceConfig(BaseModel):
         description="Path to save/load per-source baseline statistics.",
     )
     global_completeness_target: float = Field(
-        default=0.75,
+        default=0.66,
         description="Target reference completeness value to scale against.",
     )
 
