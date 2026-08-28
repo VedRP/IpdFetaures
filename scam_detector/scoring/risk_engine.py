@@ -280,6 +280,7 @@ class RiskEngine:
         confidence_score: float,
         *,
         supervised_score: float | None = None,
+        reputation_score: float | None = None,
         feature_contributions: list[tuple[str, float]] | None = None,
     ) -> ScamScoreResult:
         """
@@ -312,25 +313,35 @@ class RiskEngine:
         rw = cfg.blend_weights.rules_weight
         aw = cfg.blend_weights.anomaly_weight
         sw = getattr(cfg.blend_weights, "supervised_weight", 0.0)
+        rep_w = getattr(cfg.blend_weights, "reputation_weight", 0.10)
 
         use_supervised = supervised_score is not None and (
             sw > 0.0 or cfg.flags.enable_ml_risk_engine
         )
+        use_reputation = reputation_score is not None
 
+        # Build dict of active weights
+        active_weights = {
+            "rules": rw,
+            "anomaly": aw,
+        }
         if use_supervised and supervised_score is not None:
-            sup = float(max(0.0, min(1.0, supervised_score)))
-            effective_sw = sw if sw > 0.0 else 0.40
-            total_w = rw + aw + effective_sw
-            if total_w <= 0:
-                rw, aw, effective_sw, total_w = 0.40, 0.20, 0.40, 1.0
-            rw_norm, aw_norm, sw_norm = rw / total_w, aw / total_w, effective_sw / total_w
-            blended_01 = rw_norm * rules_score + aw_norm * anomaly + sw_norm * sup
-        else:
-            total_w = rw + aw
-            if total_w <= 0:
-                rw, aw, total_w = 0.60, 0.40, 1.0
-            rw_norm, aw_norm = rw / total_w, aw / total_w
-            blended_01 = rw_norm * rules_score + aw_norm * anomaly
+            active_weights["supervised"] = sw if sw > 0.0 else 0.40
+        if use_reputation and reputation_score is not None:
+            active_weights["reputation"] = rep_w
+
+        total_w = sum(active_weights.values())
+        if total_w <= 0:
+            active_weights = {"rules": 0.50, "anomaly": 0.40}
+            if use_reputation:
+                active_weights["reputation"] = 0.10
+            total_w = sum(active_weights.values())
+
+        blended_01 = (active_weights["rules"] / total_w) * rules_score + (active_weights["anomaly"] / total_w) * anomaly
+        if "supervised" in active_weights and supervised_score is not None:
+            blended_01 += (active_weights["supervised"] / total_w) * float(supervised_score)
+        if "reputation" in active_weights and reputation_score is not None:
+            blended_01 += (active_weights["reputation"] / total_w) * float(reputation_score)
 
         # Calibrate score mapping (falls back to raw blended_01 if no calibration model exists)
         if self._calibrator is not None:
@@ -404,6 +415,7 @@ class RiskEngine:
             rules_score=rules_score,
             anomaly_score=anomaly,
             supervised_score=supervised_score if use_supervised else None,
+            reputation_score=reputation_score if use_reputation else None,
             hard_disqualifying_forced=hard_forced,
             low_confidence_forced_review=low_conf_forced,
         )
