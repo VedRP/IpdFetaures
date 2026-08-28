@@ -154,21 +154,24 @@ def test_two_consecutive_pipeline_runs(tmp_path: Path):
     assert "company a" in reps
     assert "company b" in reps
 
-    # Verify decisions
-    dec_a1 = outputs_run1[0]["decision"]
-    dec_b1 = outputs_run1[1]["decision"]
+    # Company A should be clear, Company B should be review/block
+    out_a1 = next(o for o in outputs_run1 if o["company"] == "Company A")
+    out_b1 = next(o for o in outputs_run1 if o["company"] == "Company B")
 
-    # Since it was the first run, the reputation store wasn't populated prior to scoring,
-    # so reputation score should not have impacted the scores.
+    assert reps["company a"].total_postings == 1
+    assert reps["company a"].clear_count == 1
+    assert reps["company b"].total_postings == 1
+    assert reps["company b"].block_count == 1
 
     # Run 2: overlapping data with new listings for the same companies
+    # Let's make the listing for Company A borderline so we can see the trust bonus effect.
     records_run2 = [
         {
             "_id": "run2-rec-a",
             "company": "Company A",
-            "name": "Developer Intern",
-            "summary": "Write tests, debug code, and work with git repository.",
-            "applyLink": "https://company-a.com/apply-new",
+            "name": "Developer Intern - Urgent",
+            "summary": "Urgent hire for developer. Make money now.", # slightly spammy text to increase raw score
+            "applyLink": "https://bit.ly/company-a-short", # shortener link to increase raw score
             "datePublished": "2026-08-02",
             "stipend": {"type": "paid", "amount": {"min": 10000, "max": 10000, "period": "month"}},
             "perks": ["Certificate"],
@@ -176,22 +179,37 @@ def test_two_consecutive_pipeline_runs(tmp_path: Path):
         {
             "_id": "run2-rec-b",
             "company": "Company B",
-            "name": "Another great money making role",
-            "summary": "Urgent recruitment make money fast.",
-            "applyLink": "https://bit.ly/scam-link-fast-money",
+            "name": "Developer Intern",
+            "summary": "Write tests, debug code, and work with git repository.", # clean text
+            "applyLink": "https://company-b.com/apply", # clean link
             "datePublished": "2026-08-02",
-            "stipend": {"type": "paid", "amount": {"min": 6000000, "max": 6000000, "period": "month"}},
-            "openings": 450,
-            "skills": [],
+            "stipend": {"type": "paid", "amount": {"min": 10000, "max": 10000, "period": "month"}},
+            "perks": ["Certificate"],
         }
     ]
 
-    outputs_run2 = process_records(records_run2, config=config)
+    # Let's run a test with/without reputation to see the exact difference.
+    # Without reputation (first seen)
+    config_no_rep = Config()
+    config_no_rep.reputation.store_path = str(tmp_path / "nonexistent.jsonl")
+    outputs_run2_no_rep = process_records(records_run2, config=config_no_rep)
+    out_a2_no_rep = next(o for o in outputs_run2_no_rep if o["company"] == "Company A")
+    out_b2_no_rep = next(o for o in outputs_run2_no_rep if o["company"] == "Company B")
 
-    # The scores from Run 2 should be influenced by the reputation from Run 1.
-    # Company A had a clear decision in Run 1, so it should have a low reputation score (trust bonus).
-    # Company B had a high risk decision, so it should have a higher reputation score.
-    # Let's verify that the reputation store updated again and total postings became 2.
+    # With reputation
+    outputs_run2_with_rep = process_records(records_run2, config=config)
+    out_a2_with_rep = next(o for o in outputs_run2_with_rep if o["company"] == "Company A")
+    out_b2_with_rep = next(o for o in outputs_run2_with_rep if o["company"] == "Company B")
+
+    # For Company A (good reputation from Run 1):
+    # Its score with reputation should be LOWER (trust bonus) than without reputation.
+    assert out_a2_with_rep["scam_score"] < out_a2_no_rep["scam_score"]
+
+    # For Company B (bad reputation from Run 1):
+    # Its score with reputation should be HIGHER (penalty) than without reputation.
+    assert out_b2_with_rep["scam_score"] > out_b2_no_rep["scam_score"]
+
+    # Verify that the reputation store updated again and total postings became 2.
     reps2 = rep_store.get_all_reputations()
     assert reps2["company a"].total_postings == 2
     assert reps2["company b"].total_postings == 2
