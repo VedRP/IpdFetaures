@@ -36,6 +36,7 @@ class BlendWeights(BaseModel):
     rules_weight: float = Field(default=0.60, ge=0.0, le=1.0)
     anomaly_weight: float = Field(default=0.40, ge=0.0, le=1.0)
     supervised_weight: float = Field(default=0.0, ge=0.0, le=1.0)
+    reputation_weight: float = Field(default=0.10, ge=0.0, le=1.0)
 
 
 
@@ -217,6 +218,15 @@ class CalibrationConfig(BaseModel):
     )
 
 
+class ReputationConfig(BaseModel):
+    """Configuration for company reputation features and store."""
+
+    store_path: str = Field(
+        default="scam_detector/reputation.jsonl",
+        description="Path to serialized company reputation store",
+    )
+
+
 class Config(BaseModel):
     """Top-level config object — instantiate once and share."""
 
@@ -230,6 +240,7 @@ class Config(BaseModel):
     embeddings: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     supervised: SupervisedModelConfig = Field(default_factory=SupervisedModelConfig)
     calibration: CalibrationConfig = Field(default_factory=CalibrationConfig)
+    reputation: ReputationConfig = Field(default_factory=ReputationConfig)
     flags: FeatureFlags = Field(default_factory=FeatureFlags)
 
     # When Prompt 6 rule 1 (hard_disqualifying_signals) fires, force this
