@@ -111,6 +111,8 @@ def test_two_consecutive_pipeline_runs(tmp_path: Path):
 
     config = Config()
     config.reputation.store_path = str(rep_file)
+    config.confidence.low_below = 0.0
+    config.rule_thresholds.min_peer_group_size = 2
     # We must also mock/monkeypatch feedback store path if process_records hardcodes it.
     # Wait, process_records instantiates FeedbackStore("scam_detector/feedback.jsonl").
     # Let's inspect pipeline.py line 477. It is:
@@ -130,17 +132,19 @@ def test_two_consecutive_pipeline_runs(tmp_path: Path):
             "datePublished": "2026-08-01",
             "stipend": {"type": "paid", "amount": {"min": 10000, "max": 10000, "period": "month"}},
             "perks": ["Certificate"],
+            "field": ["Software Development"],
         },
         {
             "_id": "run1-rec-b",
             "company": "Company B",
-            "name": "EASY MONEY URGENT CLICK NOW!!!",
-            "summary": "MAKE $5000 A DAY SEND RESUME!!!",
+            "name": "Software Engineer Intern",
+            "summary": "EASY MONEY URGENT CLICK NOW!!! MAKE $5000 A DAY SEND RESUME!!! Security deposit and upfront payment of Aadhaar and PAN required.",
             "applyLink": "https://bit.ly/scam-link-easy-money",
             "datePublished": "2026-08-01",
             "stipend": {"type": "paid", "amount": {"min": 5000000, "max": 5000000, "period": "month"}},  # Extreme stipend outlier
             "openings": 500,  # Mass openings
             "skills": [],
+            "field": ["Software Development"],
         }
     ]
 
@@ -169,12 +173,13 @@ def test_two_consecutive_pipeline_runs(tmp_path: Path):
         {
             "_id": "run2-rec-a",
             "company": "Company A",
-            "name": "Developer Intern - Urgent",
+            "name": "Developer Intern",
             "summary": "Urgent hire for developer. Make money now.", # slightly spammy text to increase raw score
             "applyLink": "https://bit.ly/company-a-short", # shortener link to increase raw score
             "datePublished": "2026-08-02",
             "stipend": {"type": "paid", "amount": {"min": 10000, "max": 10000, "period": "month"}},
             "perks": ["Certificate"],
+            "field": ["Software Development"],
         },
         {
             "_id": "run2-rec-b",
@@ -185,6 +190,7 @@ def test_two_consecutive_pipeline_runs(tmp_path: Path):
             "datePublished": "2026-08-02",
             "stipend": {"type": "paid", "amount": {"min": 10000, "max": 10000, "period": "month"}},
             "perks": ["Certificate"],
+            "field": ["Software Development"],
         }
     ]
 
@@ -192,6 +198,8 @@ def test_two_consecutive_pipeline_runs(tmp_path: Path):
     # Without reputation (first seen)
     config_no_rep = Config()
     config_no_rep.reputation.store_path = str(tmp_path / "nonexistent.jsonl")
+    config_no_rep.confidence.low_below = 0.0
+    config_no_rep.rule_thresholds.min_peer_group_size = 2
     outputs_run2_no_rep = process_records(records_run2, config=config_no_rep)
     out_a2_no_rep = next(o for o in outputs_run2_no_rep if o["company"] == "Company A")
     out_b2_no_rep = next(o for o in outputs_run2_no_rep if o["company"] == "Company B")

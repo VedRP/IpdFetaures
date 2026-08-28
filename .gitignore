@@ -20,3 +20,4 @@ run_kaggle_test.py
 test_kaggle_internship.py
 output_*.json
 *_scored.json
+scam_detector/reputation.jsonl
