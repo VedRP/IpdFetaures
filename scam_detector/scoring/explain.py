@@ -175,7 +175,7 @@ def render_explanation(result: ScamScoreResult) -> str:
         f"  Summary: {result.explanation_summary or '(none)'}",
         "────────────────────────────────────────────────────────────",
         "  Triggered rules:",
-    ]
+    ])
 
     findings = result.triggered_rule_findings
     if not findings and result.triggered_rules:
