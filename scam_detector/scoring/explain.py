@@ -80,6 +80,7 @@ class ScamScoreResult(BaseModel):
     rules_score: float = Field(default=0.0, ge=0.0, le=1.0)
     anomaly_score: float = Field(default=0.0, ge=0.0, le=1.0)
     supervised_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    reputation_score: float | None = Field(default=None, ge=0.0, le=1.0)
     hard_disqualifying_forced: bool = Field(
         default=False,
         description="True when decision was forced by hard-disqualifying rule policy",
@@ -166,6 +167,10 @@ def render_explanation(result: ScamScoreResult) -> str:
         ),
         f"  Rules (0–1): {result.rules_score:.3f}   "
         f"Anomaly (0–1): {result.anomaly_score:.3f}",
+    ]
+    if result.reputation_score is not None:
+        lines.append(f"  Reputation (0–1): {result.reputation_score:.3f}")
+    lines.extend([
         "────────────────────────────────────────────────────────────",
         f"  Summary: {result.explanation_summary or '(none)'}",
         "────────────────────────────────────────────────────────────",
