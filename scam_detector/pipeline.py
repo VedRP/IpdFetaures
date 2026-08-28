@@ -473,8 +473,12 @@ def process_records(
     # ── Per-record features (Prompts 2–5) ─────────────────────────────────
     from scam_detector.features.text_features import get_scam_corpus_embeddings
     from scam_detector.feedback import FeedbackStore
+    from scam_detector.features.reputation_features import ReputationStore, company_reputation_score
+
+    feedback_store = FeedbackStore("scam_detector/feedback.jsonl")
+    rep_store = ReputationStore(cfg.reputation.store_path)
+
     try:
-        feedback_store = FeedbackStore("scam_detector/feedback.jsonl")
         scam_embeddings = get_scam_corpus_embeddings(feedback_store, records)
     except Exception:
         scam_embeddings = None
@@ -552,12 +556,20 @@ def process_records(
         )
         rule_result = rules_engine.run(rule_input)
         confidence = compute_confidence_score(rem, fv, config=cfg)
+
+        company_name = raw.get("company") or ""
+        if fv.company.is_suspect or not company_name.strip():
+            rep_score = None
+        else:
+            rep_score = company_reputation_score(company_name, rep_store, feedback_store)
+
         result: ScamScoreResult = risk_engine.score_record(
             record=rem,
             rule_result=rule_result,
             anomaly_score=anomaly_scores[i],
             confidence_score=confidence,
             supervised_score=supervised_scores[i],
+            reputation_score=rep_score,
             feature_contributions=anomaly_explanations[i],
         )
 
@@ -577,6 +589,12 @@ def process_records(
         bucket_counts.get("review", 0),
         bucket_counts.get("block", 0),
     )
+
+    # ── Update reputation store ───────────────────────────────────────────
+    try:
+        update_reputations_after_run(remediated, outputs, rep_store)
+    except Exception as exc:
+        log.warning("Failed to update reputation store: %s", exc)
 
     # ── Update per-source baselines ────────────────────────────────────────
     if cfg.confidence.enable_source_conditioning:
@@ -655,6 +673,102 @@ def update_source_baselines(
 
     # Invalidate cache
     clear_baselines_cache()
+
+
+def update_reputations_after_run(
+    remediated_records: list[RemediatedRecord],
+    outputs: list[dict[str, Any]],
+    reputation_store: ReputationStore,
+) -> None:
+    """Update company reputation history with the finalized decisions and scores from this run."""
+    from datetime import date, datetime, timezone
+    from scam_detector.features.reputation_features import CompanyReputation
+    from scam_detector.features.company_features import is_company_suspect, _parse_date
+    from scam_detector.features.duplicate_detection import _record_id
+
+    # 1. Load existing reputations
+    existing = reputation_store.get_all_reputations()
+
+    # 2. Group updates by company key
+    updates_by_company: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for i, rem in enumerate(remediated_records):
+        rec = rem.record
+        out = outputs[i]
+        company = rec.get("company") or ""
+        company_key = company.strip().lower()
+        suspect = is_company_suspect(rem.flags)
+
+        if suspect or not company_key:
+            continue
+
+        rid = _record_id(rec, i)
+        date_published = rec.get("datePublished") or rec.get("date_published") or ""
+        updates_by_company[company_key].append({
+            "record_id": rid,
+            "decision": out.get("decision", "review"),
+            "scam_score": out.get("scam_score", 50.0),
+            "date": date_published,
+        })
+
+    if not updates_by_company:
+        return
+
+    # 3. Create or update CompanyReputation for each company
+    updated_records: list[CompanyReputation] = []
+    for company_key, items in updates_by_company.items():
+        dates = [d for item in items if (d := _parse_date(item["date"]))]
+        min_date_in_run = min(dates).isoformat() if dates else date.today().isoformat()
+
+        if company_key in existing:
+            rep = existing[company_key]
+            old_total = rep.total_postings
+            new_total = old_total + len(items)
+
+            # update totals and counts
+            rep.total_postings = new_total
+            for item in items:
+                dec = item["decision"]
+                if dec == "clear":
+                    rep.clear_count += 1
+                elif dec == "block":
+                    rep.block_count += 1
+                else:
+                    rep.review_count += 1
+
+                if item["record_id"] not in rep.record_ids:
+                    rep.record_ids.append(item["record_id"])
+
+            # update average scam score
+            sum_scam_score_in_run = sum(item["scam_score"] for item in items)
+            rep.average_scam_score = (rep.average_scam_score * old_total + sum_scam_score_in_run) / new_total
+
+            # update first_seen if we found an older one
+            if min_date_in_run < rep.first_seen:
+                rep.first_seen = min_date_in_run
+
+            rep.last_updated = datetime.now(timezone.utc)
+            updated_records.append(rep)
+        else:
+            clear_count = sum(1 for item in items if item["decision"] == "clear")
+            block_count = sum(1 for item in items if item["decision"] == "block")
+            review_count = sum(1 for item in items if item["decision"] == "review")
+            avg_scam_score = sum(item["scam_score"] for item in items) / len(items)
+            record_ids = [item["record_id"] for item in items]
+
+            rep = CompanyReputation(
+                company=company_key,
+                first_seen=min_date_in_run,
+                total_postings=len(items),
+                clear_count=clear_count,
+                review_count=review_count,
+                block_count=block_count,
+                average_scam_score=avg_scam_score,
+                record_ids=record_ids,
+            )
+            updated_records.append(rep)
+
+    # 4. Save updates to ReputationStore
+    reputation_store.update_reputations(updated_records)
 
 
 def run_pipeline(
