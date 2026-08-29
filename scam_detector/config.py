@@ -65,6 +65,7 @@ class RuleWeights(BaseModel):
 
     hard_disqualifying_signals: float = Field(default=0.95, ge=0.0, le=1.0)
     cross_company_duplicate: float = Field(default=0.80, ge=0.0, le=1.0)
+    shared_infrastructure: float = Field(default=0.65, ge=0.0, le=1.0)
     typosquat_domain: float = Field(default=0.70, ge=0.0, le=1.0)
     extreme_stipend_outlier: float = Field(default=0.45, ge=0.0, le=1.0)
     mass_openings_vague_role: float = Field(default=0.40, ge=0.0, le=1.0)
