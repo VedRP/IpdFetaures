@@ -88,6 +88,9 @@ class RuleInput:
     # ── Duplicate detection (Prompt 5) ────────────────────────────────────
     cross_company_duplicate: bool = False
 
+    # ── Graph features (Phase 2/3) ────────────────────────────────────────
+    shared_infrastructure: bool = False
+
     # ── Remediation flags (Prompt 1) ──────────────────────────────────────
     remediation_flags: dict = field(default_factory=dict)
 
@@ -288,6 +291,44 @@ class CrossCompanyDuplicateRule:
             weight=w,
             triggered=False,
             explanation="No cross-company near-duplicate detected.",
+        )
+
+
+class SharedInfrastructureRule:
+    """
+    Rule 3b: shared_infrastructure_flag == True
+
+    Fires when a company's applyLink domain is shared with 3+ OTHER distinctly-named
+    companies in the corpus. This indicates shared, coordinate posting infrastructure,
+    which is a strong signal for automated shell-posting networks.
+
+    Weight: 0.65 (default, configurable)
+    """
+
+    rule_id = "shared_infrastructure"
+
+    def __init__(self, config: Config | None = None) -> None:
+        self._cfg = config or _default_cfg
+
+    def evaluate(self, inp: RuleInput) -> RuleFinding:
+        w = self._cfg.rule_weights.shared_infrastructure
+        if inp.shared_infrastructure:
+            return RuleFinding(
+                rule_id=self.rule_id,
+                description="Shared off-platform infrastructure across multiple companies detected",
+                weight=w,
+                triggered=True,
+                explanation=(
+                    "This company's applyLink domain is shared with 3+ other distinctly-named "
+                    "companies — a strong signature of coordinated shell-company posting networks."
+                ),
+            )
+        return RuleFinding(
+            rule_id=self.rule_id,
+            description="Shared off-platform infrastructure across multiple companies detected",
+            weight=w,
+            triggered=False,
+            explanation="No shared off-platform infrastructure detected.",
         )
 
 
@@ -549,6 +590,7 @@ def _default_rules(config: Config | None = None) -> list[Rule]:
         HardDisqualifyingSignalsRule(cfg),
         StipendPerkContradictionRule(cfg),
         CrossCompanyDuplicateRule(cfg),
+        SharedInfrastructureRule(cfg),
         ExtremeStipendOutlierRule(cfg),
         UnverifiableCompanyRule(cfg),
         TyposquatDomainRule(cfg),
@@ -665,6 +707,9 @@ def apply_rules(features: object) -> RulesResult:
             ),
             cross_company_duplicate=bool(
                 _get(features, "cross_company_duplicate", default=False)
+            ),
+            shared_infrastructure=bool(
+                _get(features, "shared_infrastructure", default=False)
             ),
             stipend_peer_zscore=None,
             company_is_suspect=bool(
