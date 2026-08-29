@@ -390,6 +390,7 @@ def feature_vector_to_rule_input(
     fv: FeatureVector,
     *,
     cross_company_duplicate: bool,
+    shared_infrastructure: bool = False,
     flags: dict[str, Any] | None = None,
 ) -> RuleInput:
     """Explicit bridge from FeatureVector → RuleInput (avoids duck-type gaps)."""
@@ -412,6 +413,7 @@ def feature_vector_to_rule_input(
         openings_zscore=fv.structural.openings_zscore,
         field_completeness=fv.structural.field_completeness,
         cross_company_duplicate=cross_company_duplicate,
+        shared_infrastructure=shared_infrastructure,
         remediation_flags=dict(flags or {}),
     )
 
@@ -466,6 +468,14 @@ def process_records(
     min_peer_size = cfg.rule_thresholds.min_peer_group_size
     neighbors_by_id = _build_duplicate_neighbors(records)
     by_company = _index_by_company(records)
+
+    # Build company infrastructure graph
+    from scam_detector.features.graph_features import (
+        build_company_infrastructure_graph,
+        shared_infrastructure_flag,
+        duplicate_cluster_network_size,
+    )
+    infra_graph = build_company_infrastructure_graph(records, neighbors_by_id)
     peer_cache: list[list[dict[str, Any]]] = [
         build_peer_group(rec, records, min_peer_group_size=min_peer_size) for rec in records
     ]
@@ -485,6 +495,8 @@ def process_records(
 
     feature_vectors: list[FeatureVector] = []
     cross_company_flags: list[bool] = []
+    shared_infra_flags: list[bool] = []
+    cluster_network_sizes: list[int] = []
 
     for i, rem in enumerate(remediated):
         rec = rem.record
@@ -506,6 +518,14 @@ def process_records(
         dup_neighbors = neighbors_by_id.get(rid, [])
         cross_company_flags.append(
             cross_company_duplicate_flag(rec, dup_neighbors, records)
+        )
+
+        company_name = rec.get("company") or ""
+        shared_infra_flags.append(
+            shared_infrastructure_flag(company_name, infra_graph)
+        )
+        cluster_network_sizes.append(
+            duplicate_cluster_network_size(company_name, infra_graph)
         )
 
     # ── Prompt 7: anomaly model ───────────────────────────────────────────
@@ -552,6 +572,7 @@ def process_records(
         rule_input = feature_vector_to_rule_input(
             fv,
             cross_company_duplicate=cross_company_flags[i],
+            shared_infrastructure=shared_infra_flags[i],
             flags=rem.flags,
         )
         rule_result = rules_engine.run(rule_input)
@@ -579,6 +600,8 @@ def process_records(
         out["decision"] = result.decision
         out["explanation_summary"] = result.explanation_summary
         out["confidence"] = result.confidence
+        out["shared_infrastructure"] = shared_infra_flags[i]
+        out["duplicate_cluster_network_size"] = cluster_network_sizes[i]
         outputs.append(out)
         decisions.append(result.decision)
 
