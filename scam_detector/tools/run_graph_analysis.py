@@ -33,7 +33,12 @@ from scam_detector.pipeline import _build_duplicate_neighbors
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("run_graph_analysis")
 
-ARTIFACT_DIR = Path("C:/Users/vedant patil/.gemini/antigravity-ide/brain/b24f1818-674a-4e1a-ad2a-4a212d1ff52c")
+ARTIFACT_DIR = Path(
+    os.environ.get(
+        "ARTIFACT_DIR",
+        "C:/Users/vedant patil/.gemini/antigravity-ide/brain/fa7b41d5-181b-41da-adda-c5cd2be2b0df",
+    )
+)
 ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
 
 

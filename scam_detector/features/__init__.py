@@ -53,6 +53,12 @@ from scam_detector.features.duplicate_detection import (
     ClusterReport,
     cross_company_duplicate_flag,
 )
+from scam_detector.features.graph_features import (
+    build_company_infrastructure_graph,
+    shared_infrastructure_flag,
+    duplicate_cluster_network_size,
+    export_largest_components_visualization,
+)
 
 from pydantic import BaseModel, Field
 
@@ -233,6 +239,10 @@ __all__: list[str] = [
     "DuplicateMatch",
     "ClusterReport",
     "cross_company_duplicate_flag",
+    "build_company_infrastructure_graph",
+    "shared_infrastructure_flag",
+    "duplicate_cluster_network_size",
+    "export_largest_components_visualization",
     "urgency_score",
     "caps_and_punctuation_ratio",
     "genericity_score",
