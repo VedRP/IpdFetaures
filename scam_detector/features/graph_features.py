@@ -246,3 +246,102 @@ def export_largest_components_visualization(
     plt.tight_layout()
     plt.savefig(output_image_path, dpi=300, bbox_inches="tight")
     plt.close()
+
+
+def compute_graph_network_metrics(graph: nx.Graph) -> dict[str, Any]:
+    """
+    Compute aggregate graph topological metrics across all company and domain nodes.
+    Useful for system-level monitoring and cluster reporting.
+    """
+    total_nodes = graph.number_of_nodes()
+    total_edges = graph.number_of_edges()
+    if total_nodes == 0:
+        return {
+            "total_nodes": 0,
+            "total_edges": 0,
+            "company_count": 0,
+            "domain_count": 0,
+            "connected_components_count": 0,
+            "largest_component_size": 0,
+            "density": 0.0,
+            "multi_company_networks_count": 0,
+        }
+
+    company_nodes = [n for n in graph.nodes if n.startswith("company:")]
+    domain_nodes = [n for n in graph.nodes if n.startswith("domain:")]
+    components = list(nx.connected_components(graph))
+    
+    multi_company_count = sum(
+        1 for comp in components if len([n for n in comp if n.startswith("company:")]) >= 3
+    )
+    largest_comp_size = max((len(c) for c in components), default=0)
+    density = float(nx.density(graph))
+
+    return {
+        "total_nodes": total_nodes,
+        "total_edges": total_edges,
+        "company_count": len(company_nodes),
+        "domain_count": len(domain_nodes),
+        "connected_components_count": len(components),
+        "largest_component_size": largest_comp_size,
+        "density": round(density, 6),
+        "multi_company_networks_count": multi_company_count,
+    }
+
+
+def company_network_risk_profile(company: str, graph: nx.Graph) -> dict[str, Any]:
+    """
+    Compute a detailed graph risk profile for a specific company entity.
+    """
+    if not company:
+        return {
+            "company": "",
+            "is_in_graph": False,
+            "degree": 0,
+            "shared_infrastructure": False,
+            "network_cluster_size": 1,
+            "connected_domains": [],
+            "connected_peer_companies": [],
+        }
+
+    company_key = company.strip().lower()
+    company_node = f"company:{company_key}"
+
+    if not graph.has_node(company_node):
+        return {
+            "company": company,
+            "is_in_graph": False,
+            "degree": 0,
+            "shared_infrastructure": False,
+            "network_cluster_size": 1,
+            "connected_domains": [],
+            "connected_peer_companies": [],
+        }
+
+    degree = graph.degree(company_node)
+    shared_infra = shared_infrastructure_flag(company, graph)
+    network_size = duplicate_cluster_network_size(company, graph)
+
+    connected_domains = [
+        graph.nodes[n].get("label", n.replace("domain:", ""))
+        for n in graph.neighbors(company_node)
+        if n.startswith("domain:")
+    ]
+    
+    # Peer companies directly or 2-hop connected
+    component = nx.node_connected_component(graph, company_node)
+    peer_companies = [
+        graph.nodes[n].get("label", n.replace("company:", ""))
+        for n in component
+        if n.startswith("company:") and n != company_node
+    ]
+
+    return {
+        "company": company,
+        "is_in_graph": True,
+        "degree": int(degree),
+        "shared_infrastructure": shared_infra,
+        "network_cluster_size": network_size,
+        "connected_domains": connected_domains,
+        "connected_peer_companies": peer_companies[:10],
+    }

@@ -152,3 +152,48 @@ def test_export_largest_components_visualization() -> None:
 
         assert os.path.exists(img_path)
         assert os.path.exists(graphml_path)
+
+
+def test_compute_graph_network_metrics() -> None:
+    from scam_detector.features.graph_features import compute_graph_network_metrics
+
+    # Empty graph
+    empty_m = compute_graph_network_metrics(nx.Graph())
+    assert empty_m["total_nodes"] == 0
+    assert empty_m["company_count"] == 0
+
+    records = [
+        {"company": "Company 1", "applyLink": "https://sharedinfra.xyz/apply", "internship_id": "rec1"},
+        {"company": "Company 2", "applyLink": "https://sharedinfra.xyz/apply", "internship_id": "rec2"},
+        {"company": "Company 3", "applyLink": "https://sharedinfra.xyz/apply", "internship_id": "rec3"},
+        {"company": "Company 4", "applyLink": "https://sharedinfra.xyz/apply", "internship_id": "rec4"},
+    ]
+    graph = build_company_infrastructure_graph(records)
+    metrics = compute_graph_network_metrics(graph)
+
+    assert metrics["company_count"] == 4
+    assert metrics["domain_count"] == 1
+    assert metrics["total_nodes"] == 5
+    assert metrics["multi_company_networks_count"] == 1
+
+
+def test_company_network_risk_profile() -> None:
+    from scam_detector.features.graph_features import company_network_risk_profile
+
+    records = [
+        {"company": "Company 1", "applyLink": "https://sharedinfra.xyz/apply", "internship_id": "rec1"},
+        {"company": "Company 2", "applyLink": "https://sharedinfra.xyz/apply", "internship_id": "rec2"},
+        {"company": "Company 3", "applyLink": "https://sharedinfra.xyz/apply", "internship_id": "rec3"},
+        {"company": "Company 4", "applyLink": "https://sharedinfra.xyz/apply", "internship_id": "rec4"},
+    ]
+    graph = build_company_infrastructure_graph(records)
+
+    prof = company_network_risk_profile("Company 1", graph)
+    assert prof["is_in_graph"] is True
+    assert prof["shared_infrastructure"] is True
+    assert prof["network_cluster_size"] == 4
+    assert "sharedinfra.xyz" in prof["connected_domains"]
+
+    unknown = company_network_risk_profile("Unknown Org", graph)
+    assert unknown["is_in_graph"] is False
+    assert unknown["network_cluster_size"] == 1

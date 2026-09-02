@@ -58,6 +58,8 @@ from scam_detector.features.graph_features import (
     shared_infrastructure_flag,
     duplicate_cluster_network_size,
     export_largest_components_visualization,
+    compute_graph_network_metrics,
+    company_network_risk_profile,
 )
 
 from pydantic import BaseModel, Field
@@ -243,6 +245,8 @@ __all__: list[str] = [
     "shared_infrastructure_flag",
     "duplicate_cluster_network_size",
     "export_largest_components_visualization",
+    "compute_graph_network_metrics",
+    "company_network_risk_profile",
     "urgency_score",
     "caps_and_punctuation_ratio",
     "genericity_score",
