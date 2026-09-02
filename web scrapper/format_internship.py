@@ -221,6 +221,15 @@ def _parse_stipend(raw: str) -> dict:
         result["type"] = "performance_based"
         return result
 
+    # Check for LPA decimal patterns e.g. "3.5 LPA", "2.4 Lacs"
+    lpa_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:lpa|l\.?p\.?a|lacs?|lakhs?)", lower)
+    if lpa_match:
+        val = float(lpa_match.group(1))
+        result["type"] = "paid"
+        result["period"] = "yearly"
+        result["amount"] = int(val * 100000) if val < 1000 else int(val)
+        return result
+
     # Extract all numeric values
     amounts = re.findall(r"[\d,]+", raw)
     nums = [int(a.replace(",", "")) for a in amounts if a.replace(",", "").isdigit() and int(a.replace(",", "")) > 0]
@@ -236,6 +245,8 @@ def _parse_stipend(raw: str) -> dict:
             result["amount"] = int(result["amount"] * 100000)
     elif "lump" in lower:
         result["period"] = "lump_sum"
+    elif any(k in lower for k in ["/week", "per week", "weekly", "/wk"]):
+        result["period"] = "weekly"
     elif any(k in lower for k in ["/month", "per month", "monthly", "/mo", "pm", "p.m."]):
         result["period"] = "monthly"
     else:
