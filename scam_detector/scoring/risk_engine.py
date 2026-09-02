@@ -282,6 +282,7 @@ class RiskEngine:
         supervised_score: float | None = None,
         reputation_score: float | None = None,
         feature_contributions: list[tuple[str, float]] | None = None,
+        explanation_method: str = "shap",
     ) -> ScamScoreResult:
         """
         Produce the final Scam Score for one internship record.
@@ -410,6 +411,7 @@ class RiskEngine:
             decision=decision,
             triggered_rules=triggered_ids,
             top_contributing_features=contributions,
+            explanation_method=explanation_method,
             explanation_summary=summary,
             triggered_rule_findings=list(triggered),
             rules_score=rules_score,

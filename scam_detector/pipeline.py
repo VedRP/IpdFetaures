@@ -535,12 +535,11 @@ def process_records(
 
     if n >= 2 and not matrix.empty:
         try:
-            model = AnomalyModel(random_state=42, contamination="auto")
+            model = AnomalyModel(random_state=42, contamination="auto", config=cfg)
             model.fit(matrix)
             scored = model.score(matrix)
             anomaly_scores = [float(s) for s in scored]
-            for i in range(n):
-                anomaly_explanations[i] = model.explain(matrix.iloc[i])
+            anomaly_explanations = model.explain_batch(matrix)
             log.info("AnomalyModel fitted on %d rows", n)
         except Exception as exc:
             log.warning("AnomalyModel failed (%s) — anomaly scores default to 0.0", exc)
@@ -592,6 +591,7 @@ def process_records(
             supervised_score=supervised_scores[i],
             reputation_score=rep_score,
             feature_contributions=anomaly_explanations[i],
+            explanation_method="shap" if cfg.anomaly.enable_shap and cfg.flags.enable_shap_anomaly_explanations else "z_score_approximation",
         )
 
 

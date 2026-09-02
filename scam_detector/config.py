@@ -172,6 +172,7 @@ class FeatureFlags(BaseModel):
     enable_temporal_features: bool = True
     enable_structural_features: bool = True
     enable_ml_risk_engine: bool = False  # off until a trained model is present
+    enable_shap_anomaly_explanations: bool = True  # use SHAP TreeExplainer for anomaly explanations
 
 
 class EmbeddingConfig(BaseModel):
@@ -228,6 +229,17 @@ class ReputationConfig(BaseModel):
     )
 
 
+class AnomalyConfig(BaseModel):
+    """Configuration for unsupervised anomaly model and explanations."""
+
+    enable_shap: bool = Field(
+        default=True,
+        description="When True, use SHAP TreeExplainer for anomaly explanations; falls back to z-score approximation when False or unavailable.",
+    )
+    n_estimators: int = Field(default=100, ge=10)
+    contamination: float | str = Field(default="auto")
+
+
 class Config(BaseModel):
     """Top-level config object — instantiate once and share."""
 
@@ -242,6 +254,7 @@ class Config(BaseModel):
     supervised: SupervisedModelConfig = Field(default_factory=SupervisedModelConfig)
     calibration: CalibrationConfig = Field(default_factory=CalibrationConfig)
     reputation: ReputationConfig = Field(default_factory=ReputationConfig)
+    anomaly: AnomalyConfig = Field(default_factory=AnomalyConfig)
     flags: FeatureFlags = Field(default_factory=FeatureFlags)
 
     # When Prompt 6 rule 1 (hard_disqualifying_signals) fires, force this

@@ -10,8 +10,9 @@ beautifulsoup4==4.13.4
 selenium==4.31.0
 webdriver-manager==4.0.2
 
-# AI enrichment
+# AI / ML enrichment
 cohere==5.15.0
+shap>=0.45.0
 
 # MongoDB
 pymongo==4.12.1

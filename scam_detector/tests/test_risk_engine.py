@@ -210,6 +210,40 @@ class TestRenderExplanation:
         assert isinstance(result, ScamScoreResult)
         assert result.explanation_summary
 
+    def test_render_explanation_with_shap_labels(self) -> None:
+        from scam_detector.scoring.explain import render_explanation
+
+        engine = RiskEngine()
+        rules = _rules(_finding("typosquat_domain", weight=0.50))
+        result = engine.score_record(
+            record={},
+            rule_result=rules,
+            anomaly_score=0.45,
+            confidence_score=0.90,
+            feature_contributions=[("text__urgency_score", 0.3541), ("url__domain_entropy", 0.1234)],
+            explanation_method="shap",
+        )
+        report = render_explanation(result)
+        assert "Top contributing anomaly features (SHAP values):" in report
+        assert "text__urgency_score: +0.3541 (SHAP)" in report
+
+    def test_render_explanation_with_zscore_labels(self) -> None:
+        from scam_detector.scoring.explain import render_explanation
+
+        engine = RiskEngine()
+        rules = _rules(_finding("typosquat_domain", weight=0.50))
+        result = engine.score_record(
+            record={},
+            rule_result=rules,
+            anomaly_score=0.45,
+            confidence_score=0.90,
+            feature_contributions=[("text__urgency_score", 3.54), ("url__domain_entropy", 1.23)],
+            explanation_method="z_score_approximation",
+        )
+        report = render_explanation(result)
+        assert "Top contributing anomaly features (|z-score| approx):" in report
+        assert "text__urgency_score: 3.5400 (z-score)" in report
+
 
 class TestBlendAndThresholds:
     def test_high_blended_score_blocks(self) -> None:
