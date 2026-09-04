@@ -113,7 +113,8 @@ def load_source_baselines(path: str) -> dict:
     if p.exists():
         try:
             with p.open("r", encoding="utf-8") as fh:
-                _BASELINES_CACHE = json.load(fh)
+                data = json.load(fh)
+                _BASELINES_CACHE = data if isinstance(data, dict) else {}
                 return _BASELINES_CACHE
         except Exception:
             pass

@@ -33,9 +33,8 @@ unverifiable_company         0.10  — scraper noise; reduces CONFIDENCE only
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
 
@@ -848,7 +847,7 @@ def apply_rules(features: object) -> RulesResult:
     else:
         # Duck-type bridge: pull fields from a FeatureVector-like object
         # so the legacy ``apply_rules(feature_vector)`` call pattern still works.
-        def _get(obj: object, *attrs: str, default: object = None) -> object:
+        def _get(obj: object, *attrs: str, default: Any = None) -> Any:
             for attr in attrs:
                 try:
                     val = getattr(obj, attr)
