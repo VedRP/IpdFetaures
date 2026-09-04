@@ -64,10 +64,13 @@ class RuleWeights(BaseModel):
     """
 
     hard_disqualifying_signals: float = Field(default=0.95, ge=0.0, le=1.0)
+    upfront_fee_and_pay_to_work: float = Field(default=0.90, ge=0.0, le=1.0)
     cross_company_duplicate: float = Field(default=0.80, ge=0.0, le=1.0)
-    shared_infrastructure: float = Field(default=0.65, ge=0.0, le=1.0)
     typosquat_domain: float = Field(default=0.70, ge=0.0, le=1.0)
+    shared_infrastructure: float = Field(default=0.65, ge=0.0, le=1.0)
+    suspicious_recruiter_contact: float = Field(default=0.50, ge=0.0, le=1.0)
     extreme_stipend_outlier: float = Field(default=0.45, ge=0.0, le=1.0)
+    urgency_psychological_pressure: float = Field(default=0.45, ge=0.0, le=1.0)
     mass_openings_vague_role: float = Field(default=0.40, ge=0.0, le=1.0)
     stipend_perk_contradiction: float = Field(default=0.35, ge=0.0, le=1.0)
     unverifiable_company: float = Field(default=0.10, ge=0.0, le=1.0)
@@ -87,6 +90,10 @@ class RuleThresholds(BaseModel):
     # MassOpeningsVagueRoleRule: openings z-score above this AND genericity above this
     mass_openings_zscore_threshold: float = Field(default=2.0, ge=0.0)
     mass_openings_genericity_threshold: float = Field(default=0.65, ge=0.0, le=1.0)
+
+    # UrgencyAndPsychologicalPressureRule thresholds
+    urgency_score_threshold: float = Field(default=0.65, ge=0.0, le=1.0)
+    emotional_manipulation_threshold: float = Field(default=0.50, ge=0.0, le=1.0)
 
     # Minimum peer group size required to compute stable z-scores
     min_peer_group_size: int = Field(

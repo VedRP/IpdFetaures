@@ -91,6 +91,19 @@ class RuleInput:
     # ── Graph features (Phase 2/3) ────────────────────────────────────────
     shared_infrastructure: bool = False
 
+    # ── Upfront payment & pay-to-work signals ─────────────────────────────
+    payment_required: bool = False
+    registration_fee: float = 0.0
+    fake_certificate_offer: bool = False
+
+    # ── Recruiter contact authenticity ────────────────────────────────────
+    recruiter_email_type: str = "Corporate"
+    suspicious_email_domain: bool = False
+
+    # ── Psychological pressure & manipulation signals ─────────────────────
+    emotional_manipulation_score: float = 0.0
+    phishing_language_score: float = 0.0
+
     # ── Remediation flags (Prompt 1) ──────────────────────────────────────
     remediation_flags: dict = field(default_factory=dict)
 
@@ -580,6 +593,152 @@ class MassOpeningsVagueRoleRule:
         )
 
 
+class UpfrontFeeAndPayToWorkRule:
+    """
+    Rule 9: Upfront payment, registration fee, or pay-to-work pattern.
+
+    Fires when any of:
+      - payment_required is True
+      - registration_fee > 0
+      - fake_certificate_offer is True (guaranteed certificate upon payment)
+
+    Weight: 0.90 — near hard-reject; genuine internships never charge candidates
+    for registration, application, security deposits, or certificates.
+    """
+
+    rule_id = "upfront_fee_and_pay_to_work"
+
+    def __init__(self, config: Config | None = None) -> None:
+        self._cfg = config or _default_cfg
+
+    def evaluate(self, inp: RuleInput) -> RuleFinding:
+        w = self._cfg.rule_weights.upfront_fee_and_pay_to_work
+        reasons: list[str] = []
+        if inp.payment_required:
+            reasons.append("upfront payment explicitly required")
+        if inp.registration_fee > 0:
+            reasons.append(f"registration fee of INR {inp.registration_fee:.2f} demanded")
+        if inp.fake_certificate_offer:
+            reasons.append("pay-to-receive certificate / certificate sales pattern")
+
+        if reasons:
+            return RuleFinding(
+                rule_id=self.rule_id,
+                description="Upfront fee or pay-to-work requirement",
+                weight=w,
+                triggered=True,
+                explanation=(
+                    "Pay-to-work pattern detected: " + "; ".join(reasons) +
+                    ". Legitimate employers do not charge internship candidates fees or deposits."
+                ),
+            )
+        return RuleFinding(
+            rule_id=self.rule_id,
+            description="Upfront fee or pay-to-work requirement",
+            weight=w,
+            triggered=False,
+            explanation="No upfront fees or pay-to-work demands detected.",
+        )
+
+
+class SuspiciousRecruiterContactRule:
+    """
+    Rule 10: Suspicious recruiter contact channel / disposable email.
+
+    Fires when recruiter uses a free webmail service (e.g. Gmail, Yahoo)
+    or an explicitly flagged suspicious email domain.
+
+    Weight: 0.50 — moderate signal. Legitimate corporate recruiters use verified
+    company domains; free email addresses are frequently used in scam operations.
+    """
+
+    rule_id = "suspicious_recruiter_contact"
+
+    def __init__(self, config: Config | None = None) -> None:
+        self._cfg = config or _default_cfg
+
+    def evaluate(self, inp: RuleInput) -> RuleFinding:
+        w = self._cfg.rule_weights.suspicious_recruiter_contact
+        reasons: list[str] = []
+        if inp.suspicious_email_domain:
+            reasons.append("recruiter email domain flagged as suspicious/unverified")
+        if str(inp.recruiter_email_type).strip().lower() in ("free", "disposable"):
+            reasons.append(f"recruiter uses {inp.recruiter_email_type.lower()} webmail instead of corporate domain")
+
+        if reasons:
+            return RuleFinding(
+                rule_id=self.rule_id,
+                description="Suspicious recruiter contact channel",
+                weight=w,
+                triggered=True,
+                explanation=(
+                    "Recruiter contact risk: " + "; ".join(reasons) +
+                    ". Corporate listings should be sourced from verified enterprise domains."
+                ),
+            )
+        return RuleFinding(
+            rule_id=self.rule_id,
+            description="Suspicious recruiter contact channel",
+            weight=w,
+            triggered=False,
+            explanation="Recruiter contact channel appears legitimate or corporate-affiliated.",
+        )
+
+
+class UrgencyAndPsychologicalPressureRule:
+    """
+    Rule 11: Artificial urgency & psychological pressure.
+
+    Fires when high urgency score, emotional manipulation score, or phishing language
+    score exceeds configured thresholds.
+
+    Weight: 0.45 — moderate signal; scams frequently use artificial countdowns,
+    pressure tactics ('apply in 2 hours', 'only 1 slot left') to rush applicants.
+    """
+
+    rule_id = "urgency_psychological_pressure"
+
+    def __init__(self, config: Config | None = None) -> None:
+        self._cfg = config or _default_cfg
+
+    def evaluate(self, inp: RuleInput) -> RuleFinding:
+        w = self._cfg.rule_weights.urgency_psychological_pressure
+        urg_thresh = self._cfg.rule_thresholds.urgency_score_threshold
+        emo_thresh = self._cfg.rule_thresholds.emotional_manipulation_threshold
+
+        reasons: list[str] = []
+        # Normalized urgency score (if scaled 0-100, normalize to [0, 1])
+        urg = inp.urgency_score / 100.0 if inp.urgency_score > 1.0 else inp.urgency_score
+        emo = inp.emotional_manipulation_score / 100.0 if inp.emotional_manipulation_score > 1.0 else inp.emotional_manipulation_score
+        phish = inp.phishing_language_score / 100.0 if inp.phishing_language_score > 1.0 else inp.phishing_language_score
+
+        if urg > urg_thresh:
+            reasons.append(f"high artificial urgency score ({urg:.2f} > {urg_thresh:.2f})")
+        if emo > emo_thresh:
+            reasons.append(f"emotional manipulation score ({emo:.2f} > {emo_thresh:.2f})")
+        if phish > 0.50:
+            reasons.append(f"phishing language indicators ({phish:.2f} > 0.50)")
+
+        if reasons:
+            return RuleFinding(
+                rule_id=self.rule_id,
+                description="Artificial urgency and psychological manipulation",
+                weight=w,
+                triggered=True,
+                explanation=(
+                    "Psychological pressure tactics detected: " + "; ".join(reasons) +
+                    ". Scammers use fabricated urgency to prevent thorough vetting."
+                ),
+            )
+        return RuleFinding(
+            rule_id=self.rule_id,
+            description="Artificial urgency and psychological manipulation",
+            weight=w,
+            triggered=False,
+            explanation="Urgency and emotional indicators within normal bounds.",
+        )
+
+
 # ---------------------------------------------------------------------------
 # Default rule registry
 # ---------------------------------------------------------------------------
@@ -588,9 +747,12 @@ def _default_rules(config: Config | None = None) -> list[Rule]:
     cfg = config or _default_cfg
     return [
         HardDisqualifyingSignalsRule(cfg),
+        UpfrontFeeAndPayToWorkRule(cfg),
         StipendPerkContradictionRule(cfg),
         CrossCompanyDuplicateRule(cfg),
         SharedInfrastructureRule(cfg),
+        SuspiciousRecruiterContactRule(cfg),
+        UrgencyAndPsychologicalPressureRule(cfg),
         ExtremeStipendOutlierRule(cfg),
         UnverifiableCompanyRule(cfg),
         TyposquatDomainRule(cfg),

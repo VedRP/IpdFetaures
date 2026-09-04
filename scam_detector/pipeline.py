@@ -392,11 +392,37 @@ def feature_vector_to_rule_input(
     cross_company_duplicate: bool,
     shared_infrastructure: bool = False,
     flags: dict[str, Any] | None = None,
+    record: dict[str, Any] | None = None,
 ) -> RuleInput:
     """Explicit bridge from FeatureVector → RuleInput (avoids duck-type gaps)."""
+    rec = record or {}
+
+    # Extract payment / fee indicators
+    payment_req = bool(rec.get("payment_required", 0))
+    reg_fee = float(rec.get("registration_fee", 0.0) or 0.0)
+    fake_cert = bool(rec.get("fake_certificate_offer", 0))
+
+    # Also detect fee phrases from text if not explicitly labeled
+    summary_text = str(rec.get("summary") or "") + " " + str(rec.get("description") or "")
+    if not payment_req and re.search(r"(?:registration|security|application|training|onboarding)\s+(?:fee|deposit|charge|amount)", summary_text, re.IGNORECASE):
+        payment_req = True
+
+    # Recruiter email signals
+    recruiter_type = str(rec.get("recruiter_email_type") or "Corporate")
+    suspicious_email = bool(rec.get("suspicious_email_domain", 0))
+    apply_link = str(rec.get("applyLink") or rec.get("apply_link") or "")
+    if "@" in apply_link:
+        if any(free_domain in apply_link.lower() for free_domain in ("@gmail.", "@yahoo.", "@hotmail.", "@outlook.", "@proton.")):
+            recruiter_type = "Free"
+
+    # Psychological manipulation signals
+    emo_score = float(rec.get("emotional_manipulation_score", 0.0) or 0.0)
+    phish_score = float(rec.get("phishing_language_score", 0.0) or 0.0)
+    urg_score = float(rec.get("urgency_score", fv.text.urgency_score) or 0.0)
+
     return RuleInput(
         sensitive_info_requested=fv.text.sensitive_info_requested,
-        urgency_score=fv.text.urgency_score,
+        urgency_score=urg_score,
         genericity_score=fv.text.genericity_score,
         caps_ratio=fv.text.caps_ratio,
         exclamation_count=fv.text.exclamation_count,
@@ -414,6 +440,13 @@ def feature_vector_to_rule_input(
         field_completeness=fv.structural.field_completeness,
         cross_company_duplicate=cross_company_duplicate,
         shared_infrastructure=shared_infrastructure,
+        payment_required=payment_req,
+        registration_fee=reg_fee,
+        fake_certificate_offer=fake_cert,
+        recruiter_email_type=recruiter_type,
+        suspicious_email_domain=suspicious_email,
+        emotional_manipulation_score=emo_score,
+        phishing_language_score=phish_score,
         remediation_flags=dict(flags or {}),
     )
 
@@ -573,6 +606,7 @@ def process_records(
             cross_company_duplicate=cross_company_flags[i],
             shared_infrastructure=shared_infra_flags[i],
             flags=rem.flags,
+            record=raw,
         )
         rule_result = rules_engine.run(rule_input)
         confidence = compute_confidence_score(rem, fv, config=cfg)
@@ -899,6 +933,7 @@ class ScamDetectorPipeline:
             features,
             cross_company_duplicate=False,
             flags=rem.flags,
+            record=raw,
         )
         rule_result = RulesEngine(config=self.config).run(rule_input)
         confidence = compute_confidence_score(rem, features)
