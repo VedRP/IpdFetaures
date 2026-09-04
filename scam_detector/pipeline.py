@@ -835,6 +835,40 @@ def run_pipeline(
 
 
 # ---------------------------------------------------------------------------
+# High-Level Scoring APIs
+# ---------------------------------------------------------------------------
+
+
+def score_batch(
+    records: list[dict[str, Any]],
+    *,
+    config: Config | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Score a batch of raw internship records through the full pipeline.
+
+    Alias for :func:`process_records`, applying data remediation, duplicate
+    and graph analysis, anomaly scoring, rules engine, and risk aggregation.
+    """
+    return process_records(records, config=config)
+
+
+def score_record(
+    record: dict[str, Any],
+    *,
+    config: Config | None = None,
+) -> dict[str, Any]:
+    """
+    Score a single raw internship record.
+
+    Returns the scored record dictionary containing 'scam_score', 'decision',
+    'confidence', and 'explanation_summary'.
+    """
+    results = process_records([record], config=config)
+    return results[0] if results else {}
+
+
+# ---------------------------------------------------------------------------
 # Single-record wrapper (backward compatible)
 # ---------------------------------------------------------------------------
 

@@ -34,9 +34,9 @@ def generate_markdown_audit_report(
         "",
         f"- **Total Postings Analyzed**: {total:,}",
         f"- **Average Scam Score**: {avg_score:.2f} / 100",
-        f"- **🚨 Blocked (High Risk)**: {blocks:,} ({blocks/max(1, total):.1%})",
-        f"- **⚠️ Flagged for Review (Medium Risk)**: {reviews:,} ({reviews/max(1, total):.1%})",
-        f"- **✅ Auto-Approved / Clear (Low Risk)**: {clears:,} ({clears/max(1, total):.1%})",
+        f"- 🚨 **Blocked (High Risk): {blocks:,}** ({blocks/max(1, total):.1%})",
+        f"- ⚠️ **Flagged for Review (Medium Risk): {reviews:,}** ({reviews/max(1, total):.1%})",
+        f"- ✅ **Auto-Approved / Clear (Low Risk): {clears:,}** ({clears/max(1, total):.1%})",
         "",
     ]
 
