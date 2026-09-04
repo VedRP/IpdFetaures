@@ -27,6 +27,8 @@ except ImportError:
 from scam_detector.config import cfg
 from scam_detector.pipeline import score_batch, score_record
 from scam_detector.scoring.explain import render_explanation, ScamScoreResult
+from scam_detector.scoring.rules_engine import _default_rules
+from scam_detector.features.reputation_features import ReputationStore, company_reputation_score
 from scam_detector.features.graph_features import (
     build_company_infrastructure_graph,
     compute_graph_network_metrics,
@@ -48,16 +50,21 @@ class InternshipInput(BaseModel):
     applyLink: Optional[str] = Field(default=None, alias="apply_link")
     summary: Optional[str] = None
     description: Optional[str] = None
+    location: Optional[str] = Field(default=None, alias="city")
+    isRemote: Optional[bool] = Field(default=None, alias="is_remote")
     stipend: Optional[Any] = None
-    duration: Optional[Any] = None
-    location: Optional[Any] = None
+    perks: Optional[Any] = None
     skills: Optional[list[str]] = None
     openings: Optional[int] = None
-    source: Optional[str] = "api"
-
-
-class ScoreBatchRequest(BaseModel):
-    records: list[dict[str, Any]] = Field(..., min_length=1)
+    postedDate: Optional[str] = Field(default=None, alias="datePublished")
+    deadline: Optional[str] = Field(default=None, alias="validThrough")
+    payment_required: Optional[int] = None
+    registration_fee: Optional[float] = None
+    fake_certificate_offer: Optional[int] = None
+    recruiter_email_type: Optional[str] = None
+    suspicious_email_domain: Optional[int] = None
+    emotional_manipulation_score: Optional[float] = None
+    phishing_language_score: Optional[float] = None
 
 
 class ScoreResponse(BaseModel):
@@ -69,10 +76,13 @@ class ScoreResponse(BaseModel):
     confidence_level: str
     explanation_summary: str
     triggered_rules: list[str]
-    top_contributing_features: list[tuple[str, float]]
+    top_contributing_features: list[dict[str, Any]]
     shared_infrastructure: bool
     duplicate_cluster_network_size: int
-    report: Optional[str] = None
+
+
+class ScoreBatchRequest(BaseModel):
+    records: list[dict[str, Any]] = Field(..., min_length=1)
 
 
 class BatchScoreResponse(BaseModel):
@@ -91,6 +101,56 @@ class GraphAnalyzeRequest(BaseModel):
 class GraphAnalyzeResponse(BaseModel):
     metrics: dict[str, Any]
     target_company_profile: Optional[dict[str, Any]] = None
+
+
+class RuleInfo(BaseModel):
+    rule_id: str
+    description: str
+    weight: float
+
+
+class RulesListResponse(BaseModel):
+    total_rules: int
+    rules: list[RuleInfo]
+
+
+class CompanyReputationResponse(BaseModel):
+    company: str
+    known: bool
+    reputation_score: Optional[float] = None
+    risk_level: str = "unknown"
+    total_postings: int = 0
+    clear_count: int = 0
+    review_count: int = 0
+    block_count: int = 0
+    average_scam_score: float = 0.0
+
+
+class SystemStatsResponse(BaseModel):
+    status: str
+    version: str
+    total_rules: int
+    decision_thresholds: dict[str, float]
+    rule_weights: dict[str, float]
+
+
+class BenchmarkSampleRequest(BaseModel):
+    records: list[dict[str, Any]] = Field(..., min_length=1)
+    label_field: str = "is_fake_posting"
+    decision_threshold: float = 50.0
+
+
+class BenchmarkSampleResponse(BaseModel):
+    total_samples: int
+    true_positives: int
+    false_positives: int
+    true_negatives: int
+    false_negatives: int
+    accuracy: float
+    precision: float
+    recall: float
+    f1_score: float
+    latency_ms_per_record: float
 
 
 # ---------------------------------------------------------------------------
@@ -194,6 +254,103 @@ def create_app() -> Any:
         except Exception as exc:
             log.exception("Error analyzing graph: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc))
+
+    @app.get("/rules", response_model=RulesListResponse)
+    def list_rules() -> RulesListResponse:
+        rules = _default_rules(cfg)
+        rule_list = [
+            RuleInfo(
+                rule_id=getattr(r, "rule_id", "unknown"),
+                description=getattr(r, "__doc__", "").strip().split("\n")[0] if getattr(r, "__doc__", "") else getattr(r, "rule_id", ""),
+                weight=float(getattr(cfg.rule_weights, getattr(r, "rule_id", ""), 0.5)),
+            )
+            for r in rules
+        ]
+        return RulesListResponse(total_rules=len(rule_list), rules=rule_list)
+
+    @app.get("/reputation/{company_name}", response_model=CompanyReputationResponse)
+    def get_company_reputation(company_name: str) -> CompanyReputationResponse:
+        rep_store = ReputationStore()
+        all_reps = rep_store.get_all_reputations()
+        norm_name = company_name.strip().lower()
+        if norm_name not in all_reps:
+            return CompanyReputationResponse(
+                company=company_name,
+                known=False,
+                reputation_score=None,
+                risk_level="unknown",
+            )
+        rep = all_reps[norm_name]
+        score = company_reputation_score(company_name, rep_store)
+        risk = "low" if (score or 0.0) < 0.35 else ("medium" if (score or 0.0) < 0.70 else "high")
+        return CompanyReputationResponse(
+            company=company_name,
+            known=True,
+            reputation_score=score,
+            risk_level=risk,
+            total_postings=rep.total_postings,
+            clear_count=rep.clear_count,
+            review_count=rep.review_count,
+            block_count=rep.block_count,
+            average_scam_score=rep.average_scam_score,
+        )
+
+    @app.get("/stats", response_model=SystemStatsResponse)
+    def get_stats() -> SystemStatsResponse:
+        rules = _default_rules(cfg)
+        return SystemStatsResponse(
+            status="healthy",
+            version="0.1.0",
+            total_rules=len(rules),
+            decision_thresholds={
+                "clear_below": cfg.decision_thresholds.clear_below,
+                "block_at_or_above": cfg.decision_thresholds.block_at_or_above,
+            },
+            rule_weights=cfg.rule_weights.model_dump(),
+        )
+
+    @app.post("/benchmark/sample", response_model=BenchmarkSampleResponse)
+    def run_benchmark_sample(req: BenchmarkSampleRequest) -> BenchmarkSampleResponse:
+        import time
+        if not req.records:
+            raise HTTPException(status_code=400, detail="No records provided for benchmark")
+
+        t0 = time.perf_counter()
+        scored = score_batch(req.records, config=cfg)
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+
+        tp = fp = tn = fn = 0
+        for r, sc in zip(req.records, scored):
+            y_true = int(r.get(req.label_field, 0))
+            score = float(sc.get("scam_score", 0.0))
+            y_pred = 1 if score >= req.decision_threshold else 0
+            if y_true == 1 and y_pred == 1:
+                tp += 1
+            elif y_true == 0 and y_pred == 1:
+                fp += 1
+            elif y_true == 0 and y_pred == 0:
+                tn += 1
+            else:
+                fn += 1
+
+        total = len(req.records)
+        acc = (tp + tn) / max(1, total)
+        prec = tp / max(1, tp + fp)
+        rec = tp / max(1, tp + fn)
+        f1 = (2 * prec * rec) / max(1e-6, prec + rec) if (prec + rec) > 0 else 0.0
+
+        return BenchmarkSampleResponse(
+            total_samples=total,
+            true_positives=tp,
+            false_positives=fp,
+            true_negatives=tn,
+            false_negatives=fn,
+            accuracy=round(acc, 4),
+            precision=round(prec, 4),
+            recall=round(rec, 4),
+            f1_score=round(f1, 4),
+            latency_ms_per_record=round(elapsed_ms / max(1, total), 2),
+        )
 
     return app
 
