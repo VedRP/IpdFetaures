@@ -361,9 +361,9 @@ def generate_markdown_benchmark_report(
         "",
         "## 4. Operational Decisions Distribution",
         "",
-        f"- 🚨 **Blocked (High Risk)**: {metrics.block_count:,} ({metrics.block_count / max(1, metrics.total_samples):.1%})",
-        f"- ⚠️ **Flagged for Review (Medium Risk)**: {metrics.review_count:,} ({metrics.review_count / max(1, metrics.total_samples):.1%})",
-        f"- ✅ **Auto-Approved / Clear (Low Risk)**: {metrics.clear_count:,} ({metrics.clear_count / max(1, metrics.total_samples):.1%})",
+        f"- 🚨 **Blocked (High Risk): {metrics.block_count:,}** ({metrics.block_count / max(1, metrics.total_samples):.1%})",
+        f"- ⚠️ **Flagged for Review (Medium Risk): {metrics.review_count:,}** ({metrics.review_count / max(1, metrics.total_samples):.1%})",
+        f"- ✅ **Auto-Approved / Clear (Low Risk): {metrics.clear_count:,}** ({metrics.clear_count / max(1, metrics.total_samples):.1%})",
         "",
     ]
     return "\n".join(lines)

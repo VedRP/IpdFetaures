@@ -270,7 +270,7 @@ def create_app() -> Any:
 
     @app.get("/reputation/{company_name}", response_model=CompanyReputationResponse)
     def get_company_reputation(company_name: str) -> CompanyReputationResponse:
-        rep_store = ReputationStore()
+        rep_store = ReputationStore(cfg.reputation.store_path)
         all_reps = rep_store.get_all_reputations()
         norm_name = company_name.strip().lower()
         if norm_name not in all_reps:
