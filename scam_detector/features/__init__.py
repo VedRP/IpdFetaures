@@ -24,6 +24,8 @@ from scam_detector.features.text_features import (
     title_summary_alignment,
     readability_and_grammar_signals,
     sensitive_info_request_detector,
+    guaranteed_outcome_claim_detector,
+    external_form_and_phone_handoff_detector,
     boilerplate_similarity,
 )
 from scam_detector.features.company_features import (
@@ -88,6 +90,7 @@ def extract_all(
     unified :class:`FeatureVector`.
     """
     from typing import Any
+    from scam_detector.config import cfg
     from scam_detector.features.stipend_features import (
         normalize_stipend_to_hourly_inr,
         stipend_zscore,
@@ -161,8 +164,8 @@ def extract_all(
         hourly_inr=hourly,
         perk_consistency_ok=not contradiction,
         stipend_type=stipend_type,
-        is_outlier_high=bool(peer_z is not None and peer_z > 3.0),
-        is_outlier_low=bool(peer_z is not None and peer_z < -2.0),
+        is_outlier_high=bool(peer_z is not None and peer_z > cfg.rule_thresholds.stipend_zscore_threshold),
+        is_outlier_low=bool(peer_z is not None and peer_z < -cfg.rule_thresholds.stipend_zscore_threshold),
         amount_plausibility_score=1.0 if hourly is not None else 0.5,
         missing_stipend_for_role=hourly is None,
     )
@@ -253,5 +256,7 @@ __all__: list[str] = [
     "title_summary_alignment",
     "readability_and_grammar_signals",
     "sensitive_info_request_detector",
+    "guaranteed_outcome_claim_detector",
+    "external_form_and_phone_handoff_detector",
     "boilerplate_similarity",
 ]

@@ -40,6 +40,9 @@ from scam_detector.scoring.rules_engine import (
     RulesResult,
     RulesEngine,
     HardDisqualifyingSignalsRule,
+    GuaranteedOutcomeClaimRule,
+    ExternalFormHandoffRule,
+    NgoFundraisingStipendNetworkRule,
     StipendPerkContradictionRule,
     CrossCompanyDuplicateRule,
     ExtremeStipendOutlierRule,
@@ -138,6 +141,210 @@ class TestHardDisqualifyingSignalsRule:
     def test_returns_rule_finding_instance(self) -> None:
         assert isinstance(self.rule.evaluate(_clean()), RuleFinding)
 
+
+# ===========================================================================
+# TestGuaranteedOutcomeClaimRule
+# ===========================================================================
+
+class TestGuaranteedOutcomeClaimRule:
+
+    def setup_method(self) -> None:
+        self.rule = GuaranteedOutcomeClaimRule()
+
+    # ── Trigger ───────────────────────────────────────────────────────────
+
+    def test_triggers_when_guaranteed_outcome_claim_true(self) -> None:
+        inp = RuleInput(guaranteed_outcome_claim=True)
+        finding = self.rule.evaluate(inp)
+        assert finding.triggered is True
+
+    def test_triggered_rule_id_correct(self) -> None:
+        finding = self.rule.evaluate(RuleInput(guaranteed_outcome_claim=True))
+        assert finding.rule_id == "guaranteed_outcome_claim"
+
+    def test_triggered_weight_matches_config_default(self) -> None:
+        finding = self.rule.evaluate(RuleInput(guaranteed_outcome_claim=True))
+        assert finding.weight == pytest.approx(0.85)
+
+    def test_triggered_explanation_mentions_guarantee_or_interview(self) -> None:
+        finding = self.rule.evaluate(RuleInput(guaranteed_outcome_claim=True))
+        explanation_lc = finding.explanation.lower()
+        assert any(kw in explanation_lc for kw in ("guarantee", "interview", "handoff"))
+
+    # ── No-trigger ────────────────────────────────────────────────────────
+
+    def test_does_not_trigger_on_clean_input(self) -> None:
+        finding = self.rule.evaluate(_clean())
+        assert finding.triggered is False
+
+    def test_does_not_trigger_when_false(self) -> None:
+        finding = self.rule.evaluate(RuleInput(guaranteed_outcome_claim=False))
+        assert finding.triggered is False
+
+    def test_non_triggered_weight_still_set(self) -> None:
+        finding = self.rule.evaluate(_clean())
+        assert finding.weight == pytest.approx(0.85)
+
+    def test_non_triggered_explanation_non_empty(self) -> None:
+        assert self.rule.evaluate(_clean()).explanation != ""
+
+    # ── Weight configurability ────────────────────────────────────────────
+
+    def test_custom_weight_reflected_in_finding(self) -> None:
+        rule = GuaranteedOutcomeClaimRule(config=_cfg(guaranteed_outcome_claim=0.50))
+        finding = rule.evaluate(RuleInput(guaranteed_outcome_claim=True))
+        assert finding.weight == pytest.approx(0.50)
+        assert finding.triggered is True
+
+    def test_weight_change_does_not_affect_trigger_logic(self) -> None:
+        rule_low = GuaranteedOutcomeClaimRule(config=_cfg(guaranteed_outcome_claim=0.10))
+        rule_high = GuaranteedOutcomeClaimRule(config=_cfg(guaranteed_outcome_claim=0.99))
+        for inp in (RuleInput(guaranteed_outcome_claim=True),
+                    RuleInput(guaranteed_outcome_claim=False)):
+            assert rule_low.evaluate(inp).triggered == rule_high.evaluate(inp).triggered
+
+    # ── Return type ───────────────────────────────────────────────────────
+
+    def test_returns_rule_finding_instance(self) -> None:
+        assert isinstance(self.rule.evaluate(_clean()), RuleFinding)
+
+
+# ===========================================================================
+# TestExternalFormHandoffRule
+# ===========================================================================
+
+class TestExternalFormHandoffRule:
+
+    def setup_method(self) -> None:
+        self.rule = ExternalFormHandoffRule()
+
+    # ── Trigger: both signals (escalated weight) ────────────────────────────
+
+    def test_triggers_when_both_form_and_phone_present(self) -> None:
+        inp = RuleInput(external_form_detected=True, personal_contact_handoff_detected=True)
+        finding = self.rule.evaluate(inp)
+        assert finding.triggered is True
+
+    def test_both_present_escalates_weight_above_base(self) -> None:
+        finding = self.rule.evaluate(
+            RuleInput(external_form_detected=True, personal_contact_handoff_detected=True)
+        )
+        assert finding.weight == pytest.approx(0.85)
+
+    def test_escalated_weight_capped_at_one(self) -> None:
+        rule = ExternalFormHandoffRule(config=_cfg(external_form_handoff=0.90))
+        finding = rule.evaluate(
+            RuleInput(external_form_detected=True, personal_contact_handoff_detected=True)
+        )
+        assert finding.weight == pytest.approx(1.0)
+
+    # ── Trigger: single signal (base weight) ────────────────────────────────
+
+    def test_triggers_on_form_alone(self) -> None:
+        finding = self.rule.evaluate(RuleInput(external_form_detected=True))
+        assert finding.triggered is True
+        assert finding.weight == pytest.approx(0.60)
+
+    def test_triggers_on_phone_alone(self) -> None:
+        finding = self.rule.evaluate(RuleInput(personal_contact_handoff_detected=True))
+        assert finding.triggered is True
+        assert finding.weight == pytest.approx(0.60)
+
+    def test_triggered_rule_id_correct(self) -> None:
+        finding = self.rule.evaluate(RuleInput(external_form_detected=True))
+        assert finding.rule_id == "external_form_handoff"
+
+    # ── No-trigger ────────────────────────────────────────────────────────
+
+    def test_does_not_trigger_on_clean_input(self) -> None:
+        finding = self.rule.evaluate(_clean())
+        assert finding.triggered is False
+
+    def test_non_triggered_weight_still_set(self) -> None:
+        finding = self.rule.evaluate(_clean())
+        assert finding.weight == pytest.approx(0.60)
+
+    def test_non_triggered_explanation_non_empty(self) -> None:
+        assert self.rule.evaluate(_clean()).explanation != ""
+
+    # ── Weight configurability ────────────────────────────────────────────
+
+    def test_custom_base_weight_reflected(self) -> None:
+        rule = ExternalFormHandoffRule(config=_cfg(external_form_handoff=0.40))
+        finding = rule.evaluate(RuleInput(external_form_detected=True))
+        assert finding.weight == pytest.approx(0.40)
+
+    # ── Return type ───────────────────────────────────────────────────────
+
+    def test_returns_rule_finding_instance(self) -> None:
+        assert isinstance(self.rule.evaluate(_clean()), RuleFinding)
+
+
+# ===========================================================================
+# TestNgoFundraisingStipendNetworkRule
+# ===========================================================================
+
+class TestNgoFundraisingStipendNetworkRule:
+
+    def setup_method(self) -> None:
+        self.rule = NgoFundraisingStipendNetworkRule()
+
+    # ── Trigger ───────────────────────────────────────────────────────────
+
+    def test_triggers_when_ngo_stipend_network_true(self) -> None:
+        inp = RuleInput(ngo_stipend_network=True, ngo_stipend_network_company_count=5)
+        finding = self.rule.evaluate(inp)
+        assert finding.triggered is True
+
+    def test_triggered_rule_id_correct(self) -> None:
+        finding = self.rule.evaluate(RuleInput(ngo_stipend_network=True))
+        assert finding.rule_id == "ngo_fundraising_stipend_network"
+
+    def test_triggered_weight_matches_config_default(self) -> None:
+        finding = self.rule.evaluate(RuleInput(ngo_stipend_network=True))
+        assert finding.weight == pytest.approx(0.65)
+
+    def test_triggered_explanation_mentions_company_count(self) -> None:
+        finding = self.rule.evaluate(
+            RuleInput(ngo_stipend_network=True, ngo_stipend_network_company_count=7)
+        )
+        assert "7" in finding.explanation
+
+    # ── No-trigger ────────────────────────────────────────────────────────
+
+    def test_does_not_trigger_on_clean_input(self) -> None:
+        finding = self.rule.evaluate(_clean())
+        assert finding.triggered is False
+
+    def test_does_not_trigger_when_false(self) -> None:
+        finding = self.rule.evaluate(RuleInput(ngo_stipend_network=False))
+        assert finding.triggered is False
+
+    def test_non_triggered_weight_still_set(self) -> None:
+        finding = self.rule.evaluate(_clean())
+        assert finding.weight == pytest.approx(0.65)
+
+    def test_non_triggered_explanation_non_empty(self) -> None:
+        assert self.rule.evaluate(_clean()).explanation != ""
+
+    # ── Weight configurability ────────────────────────────────────────────
+
+    def test_custom_weight_reflected_in_finding(self) -> None:
+        rule = NgoFundraisingStipendNetworkRule(config=_cfg(ngo_fundraising_stipend_network=0.50))
+        finding = rule.evaluate(RuleInput(ngo_stipend_network=True))
+        assert finding.weight == pytest.approx(0.50)
+        assert finding.triggered is True
+
+    def test_weight_change_does_not_affect_trigger_logic(self) -> None:
+        rule_low = NgoFundraisingStipendNetworkRule(config=_cfg(ngo_fundraising_stipend_network=0.10))
+        rule_high = NgoFundraisingStipendNetworkRule(config=_cfg(ngo_fundraising_stipend_network=0.99))
+        for inp in (RuleInput(ngo_stipend_network=True), RuleInput(ngo_stipend_network=False)):
+            assert rule_low.evaluate(inp).triggered == rule_high.evaluate(inp).triggered
+
+    # ── Return type ───────────────────────────────────────────────────────
+
+    def test_returns_rule_finding_instance(self) -> None:
+        assert isinstance(self.rule.evaluate(_clean()), RuleFinding)
 
 
 # ===========================================================================

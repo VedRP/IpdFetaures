@@ -25,6 +25,9 @@ from scam_detector.features.company_features import (
     has_legal_suffix,
     company_posting_frequency,
     typosquat_brand_distance,
+    is_ngo_or_fundraising_sector,
+    build_lump_sum_stipend_index,
+    ngo_stipend_network_flag,
 )
 from scam_detector.features.url_features import (
     UrlFeatures,
@@ -666,3 +669,104 @@ class TestExtractCompanyUrlFeatures:
             flags={"company_suspect": True},
         )
         assert result.company.is_suspect is True
+
+
+# ===========================================================================
+# is_ngo_or_fundraising_sector / build_lump_sum_stipend_index / ngo_stipend_network_flag
+# ===========================================================================
+
+def _lump_sum(amount: float, currency: str = "INR") -> dict:
+    return {"type": "paid", "amount": amount, "currency": currency, "period": "lump_sum"}
+
+
+class TestIsNgoOrFundraisingSector:
+
+    def test_foundation_in_company_name(self) -> None:
+        assert is_ngo_or_fundraising_sector({"company": "NayePankh Foundation", "name": "Business Consultant"}) is True
+
+    def test_fundraising_in_title(self) -> None:
+        assert is_ngo_or_fundraising_sector({"company": "Acme Corp", "name": "Fundraising Internship"}) is True
+
+    def test_trust_in_company_name(self) -> None:
+        assert is_ngo_or_fundraising_sector({"company": "My Story Trust", "name": "HR Intern"}) is True
+
+    def test_ordinary_tech_company_not_flagged(self) -> None:
+        assert is_ngo_or_fundraising_sector({"company": "Razorpay", "name": "Backend Engineering Intern"}) is False
+
+    def test_empty_record_not_flagged(self) -> None:
+        assert is_ngo_or_fundraising_sector({}) is False
+
+    def test_ngo_keyword_in_tags(self) -> None:
+        assert is_ngo_or_fundraising_sector({"company": "Acme", "name": "Intern", "tags": ["csr", "internship"]}) is True
+
+
+class TestNgoStipendNetworkFlag:
+
+    def test_flags_when_3_plus_distinct_companies_share_amount(self) -> None:
+        remediated = [
+            ({"company": "NayePankh Foundation", "stipend": _lump_sum(15000)}, {}),
+            ({"company": "Basti Ki Pathshala Foundation", "stipend": _lump_sum(15000)}, {}),
+            ({"company": "Queens Of Change Foundation", "stipend": _lump_sum(15000)}, {}),
+        ]
+        index = build_lump_sum_stipend_index(remediated)
+        record = {"company": "NayePankh Foundation", "stipend": _lump_sum(15000)}
+        flagged, count = ngo_stipend_network_flag(record, index, min_distinct_companies=3)
+        assert flagged is True
+        assert count == 3
+
+    def test_does_not_flag_below_threshold(self) -> None:
+        remediated = [
+            ({"company": "NayePankh Foundation", "stipend": _lump_sum(15000)}, {}),
+            ({"company": "Basti Ki Pathshala Foundation", "stipend": _lump_sum(15000)}, {}),
+        ]
+        index = build_lump_sum_stipend_index(remediated)
+        record = {"company": "NayePankh Foundation", "stipend": _lump_sum(15000)}
+        flagged, count = ngo_stipend_network_flag(record, index, min_distinct_companies=3)
+        assert flagged is False
+        assert count == 2
+
+    def test_excludes_company_suspect_from_index(self) -> None:
+        # "career navigator" / "linkedin screen" style category-leak entries
+        # must not inflate the distinct-company count
+        remediated = [
+            ({"company": "NayePankh Foundation", "stipend": _lump_sum(15000)}, {}),
+            ({"company": "Basti Ki Pathshala Foundation", "stipend": _lump_sum(15000)}, {}),
+            ({"company": "career navigator", "stipend": _lump_sum(15000)}, {"company_suspect": True}),
+        ]
+        index = build_lump_sum_stipend_index(remediated)
+        record = {"company": "NayePankh Foundation", "stipend": _lump_sum(15000)}
+        flagged, count = ngo_stipend_network_flag(record, index, min_distinct_companies=3)
+        assert flagged is False
+        assert count == 2
+
+    def test_ignores_monthly_stipends(self) -> None:
+        monthly = {"type": "paid", "amount": 5000, "currency": "INR", "period": "monthly"}
+        remediated = [
+            ({"company": "A", "stipend": monthly}, {}),
+            ({"company": "B", "stipend": monthly}, {}),
+            ({"company": "C", "stipend": monthly}, {}),
+        ]
+        index = build_lump_sum_stipend_index(remediated)
+        record = {"company": "A", "stipend": monthly}
+        flagged, count = ngo_stipend_network_flag(record, index, min_distinct_companies=3)
+        assert flagged is False
+        assert count == 0
+
+    def test_ignores_unpaid_zero_amount(self) -> None:
+        unpaid = {"type": "unpaid", "amount": 0, "currency": "INR", "period": "monthly"}
+        remediated = [
+            ({"company": "A", "stipend": unpaid}, {}),
+            ({"company": "B", "stipend": unpaid}, {}),
+            ({"company": "C", "stipend": unpaid}, {}),
+        ]
+        index = build_lump_sum_stipend_index(remediated)
+        record = {"company": "A", "stipend": unpaid}
+        flagged, count = ngo_stipend_network_flag(record, index, min_distinct_companies=3)
+        assert flagged is False
+        assert count == 0
+
+    def test_empty_index_does_not_crash(self) -> None:
+        record = {"company": "A", "stipend": _lump_sum(15000)}
+        flagged, count = ngo_stipend_network_flag(record, {}, min_distinct_companies=3)
+        assert flagged is False
+        assert count == 0

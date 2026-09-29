@@ -310,8 +310,10 @@ def _enrich_feature_vector(
     company_records: list[dict[str, Any]],
     scam_embeddings: Any | None = None,
     min_peer_group_size: int = 8,
+    config: Config | None = None,
 ) -> FeatureVector:
     """Per-record feature extraction using pre-built corpus structures."""
+    cfg = config or default_cfg
     raw = remediated.record
     flags = remediated.flags
     raw_with_flags = {**raw, "_flags": flags}
@@ -340,8 +342,8 @@ def _enrich_feature_vector(
         hourly_inr=hourly,
         perk_consistency_ok=not contradiction,
         stipend_type=stipend_type,
-        is_outlier_high=bool(peer_z is not None and peer_z > 3.0),
-        is_outlier_low=bool(peer_z is not None and peer_z < -2.0),
+        is_outlier_high=bool(peer_z is not None and peer_z > cfg.rule_thresholds.stipend_zscore_threshold),
+        is_outlier_low=bool(peer_z is not None and peer_z < -cfg.rule_thresholds.stipend_zscore_threshold),
         amount_plausibility_score=1.0 if hourly is not None else 0.5,
         missing_stipend_for_role=hourly is None,
     )
@@ -391,6 +393,8 @@ def feature_vector_to_rule_input(
     *,
     cross_company_duplicate: bool,
     shared_infrastructure: bool = False,
+    ngo_stipend_network: bool = False,
+    ngo_stipend_network_company_count: int = 0,
     flags: dict[str, Any] | None = None,
     record: dict[str, Any] | None = None,
 ) -> RuleInput:
@@ -422,6 +426,9 @@ def feature_vector_to_rule_input(
 
     return RuleInput(
         sensitive_info_requested=fv.text.sensitive_info_requested,
+        guaranteed_outcome_claim=fv.text.guaranteed_outcome_claim,
+        external_form_detected=fv.text.external_form_detected,
+        personal_contact_handoff_detected=fv.text.personal_contact_handoff_detected,
         urgency_score=urg_score,
         genericity_score=fv.text.genericity_score,
         caps_ratio=fv.text.caps_ratio,
@@ -440,6 +447,8 @@ def feature_vector_to_rule_input(
         field_completeness=fv.structural.field_completeness,
         cross_company_duplicate=cross_company_duplicate,
         shared_infrastructure=shared_infrastructure,
+        ngo_stipend_network=ngo_stipend_network,
+        ngo_stipend_network_company_count=ngo_stipend_network_company_count,
         payment_required=payment_req,
         registration_fee=reg_fee,
         fake_certificate_offer=fake_cert,
@@ -513,12 +522,22 @@ def process_records(
         build_peer_group(rec, records, min_peer_group_size=min_peer_size) for rec in records
     ]
 
+    from scam_detector.features.company_features import (
+        is_ngo_or_fundraising_sector,
+        build_lump_sum_stipend_index,
+        ngo_stipend_network_flag,
+    )
+    stipend_index = build_lump_sum_stipend_index(
+        [(rem.record, rem.flags) for rem in remediated]
+    )
+    ngo_min_companies = cfg.rule_thresholds.ngo_stipend_min_distinct_companies
+
     # ── Per-record features (Prompts 2–5) ─────────────────────────────────
     from scam_detector.features.text_features import get_scam_corpus_embeddings
     from scam_detector.feedback import FeedbackStore
     from scam_detector.features.reputation_features import ReputationStore, company_reputation_score
 
-    feedback_store = FeedbackStore("scam_detector/feedback.jsonl")
+    feedback_store = FeedbackStore(cfg.feedback.store_path)
     rep_store = ReputationStore(cfg.reputation.store_path)
 
     try:
@@ -530,6 +549,8 @@ def process_records(
     cross_company_flags: list[bool] = []
     shared_infra_flags: list[bool] = []
     cluster_network_sizes: list[int] = []
+    ngo_stipend_flags: list[bool] = []
+    ngo_stipend_counts: list[int] = []
 
     for i, rem in enumerate(remediated):
         rec = rem.record
@@ -544,6 +565,7 @@ def process_records(
             company_records=company_recs,
             scam_embeddings=scam_embeddings,
             min_peer_group_size=min_peer_size,
+            config=cfg,
         )
         feature_vectors.append(fv)
 
@@ -560,6 +582,13 @@ def process_records(
         cluster_network_sizes.append(
             duplicate_cluster_network_size(company_name, infra_graph)
         )
+
+        stipend_flagged, stipend_company_count = ngo_stipend_network_flag(
+            rec, stipend_index, min_distinct_companies=ngo_min_companies
+        )
+        is_ngo = is_ngo_or_fundraising_sector(rec)
+        ngo_stipend_flags.append(bool(is_ngo and stipend_flagged))
+        ngo_stipend_counts.append(stipend_company_count if is_ngo else 0)
 
     # ── Prompt 7: anomaly model ───────────────────────────────────────────
     matrix = assemble_feature_matrix(records, feature_vectors)
@@ -605,6 +634,8 @@ def process_records(
             fv,
             cross_company_duplicate=cross_company_flags[i],
             shared_infrastructure=shared_infra_flags[i],
+            ngo_stipend_network=ngo_stipend_flags[i],
+            ngo_stipend_network_company_count=ngo_stipend_counts[i],
             flags=rem.flags,
             record=raw,
         )
@@ -634,6 +665,20 @@ def process_records(
         out["decision"] = result.decision
         out["explanation_summary"] = result.explanation_summary
         out["confidence"] = result.confidence
+        out["confidence_level"] = result.confidence_level
+        out["triggered_rules"] = result.triggered_rules
+        out["top_contributing_features"] = [
+            {"feature": name, "contribution": contribution}
+            for name, contribution in result.top_contributing_features
+        ]
+        out["risk_breakdown"] = {
+            "rules_score": result.rules_score,
+            "anomaly_score": result.anomaly_score,
+            "supervised_score": result.supervised_score,
+            "reputation_score": result.reputation_score,
+        }
+        out["hard_disqualifying_forced"] = result.hard_disqualifying_forced
+        out["low_confidence_forced_review"] = result.low_confidence_forced_review
         out["shared_infrastructure"] = shared_infra_flags[i]
         out["duplicate_cluster_network_size"] = cluster_network_sizes[i]
         outputs.append(out)

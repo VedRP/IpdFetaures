@@ -403,14 +403,26 @@ def _extract_openings(text: str) -> int:
     return 1
 
 
+
+# NOTE: previously hard-capped at 300 chars, which cut real descriptions
+# (median ~577, avg ~685, max ~4000 chars on real Internshala data) off
+# mid-sentence. This fed scam_detector's text-based signals (sensitive-info
+# / guaranteed-outcome / genericity / duplicate-detection / title-summary
+# alignment) a lossy view that empirically produced zero hits for signals
+# that should have had at least some real recall. 1500 chars covers the
+# vast majority of real postings in full while still capping extreme
+# outliers.
+_SUMMARY_MAX_CHARS = 1500
+
+
 def _generate_summary(title: str, company: str, description: str) -> str:
     """Generate a concise summary."""
     if description and description != "N/A" and len(description) > 30:
-        if len(description) > 300:
-            end = description[:300].rfind(".")
+        if len(description) > _SUMMARY_MAX_CHARS:
+            end = description[:_SUMMARY_MAX_CHARS].rfind(".")
             if end > 80:
                 return description[:end + 1]
-            return description[:300] + "..."
+            return description[:_SUMMARY_MAX_CHARS] + "..."
         return description
     return f"{title} opportunity at {company}."
 

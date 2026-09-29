@@ -59,6 +59,9 @@ class RuleInput:
 
     # ── Text features (Prompt 2) ──────────────────────────────────────────
     sensitive_info_requested: bool = False
+    guaranteed_outcome_claim: bool = False
+    external_form_detected: bool = False
+    personal_contact_handoff_detected: bool = False
     urgency_score: float = 0.0
     genericity_score: float = 0.0
     caps_ratio: float = 0.0
@@ -89,6 +92,10 @@ class RuleInput:
 
     # ── Graph features (Phase 2/3) ────────────────────────────────────────
     shared_infrastructure: bool = False
+
+    # ── NGO / fundraising-sector coordinated stipend network ──────────────
+    ngo_stipend_network: bool = False
+    ngo_stipend_network_company_count: int = 0
 
     # ── Upfront payment & pay-to-work signals ─────────────────────────────
     payment_required: bool = False
@@ -221,6 +228,117 @@ class HardDisqualifyingSignalsRule:
         )
 
 
+class GuaranteedOutcomeClaimRule:
+    """
+    Rule 1b: guaranteed_outcome_claim_detector == True
+
+    Fires when the posting claims a guaranteed job/placement/certificate
+    outcome, skips the interview entirely, or funnels applicants to a
+    WhatsApp/Telegram handoff — marketing hooks scammers front-load into the
+    title/summary/perks, which survive scraper truncation better than
+    payment-request language buried later in the text.
+
+    Weight: 0.85 (default) — near-hard disqualifying. Legitimate employers
+    cannot legally guarantee a hiring outcome or skip candidate screening.
+    """
+
+    rule_id = "guaranteed_outcome_claim"
+
+    def __init__(self, config: Config | None = None) -> None:
+        self._cfg = config or _default_cfg
+
+    def evaluate(self, inp: RuleInput) -> RuleFinding:
+        w = self._cfg.rule_weights.guaranteed_outcome_claim
+        if inp.guaranteed_outcome_claim:
+            return RuleFinding(
+                rule_id=self.rule_id,
+                description="Guaranteed-outcome / no-interview claim detected",
+                weight=w,
+                triggered=True,
+                explanation=(
+                    "Posting claims a guaranteed job/placement/certificate outcome, "
+                    "no-interview instant selection, or a WhatsApp/Telegram-only "
+                    "handoff — legitimate employers never guarantee hiring outcomes "
+                    "or skip screening entirely."
+                ),
+            )
+        return RuleFinding(
+            rule_id=self.rule_id,
+            description="Guaranteed-outcome / no-interview claim detected",
+            weight=w,
+            triggered=False,
+            explanation="No guaranteed-outcome or no-interview claims detected.",
+        )
+
+
+class ExternalFormHandoffRule:
+    """
+    Rule 1c: posting routes applicants to a generic third-party form
+    (Google Forms, Typeform, JotForm, etc.) and/or a personal phone number,
+    instead of the platform's own application flow.
+
+    Real-data basis: a "Zefrix" posting (company field corrupted to
+    "Content") read verbatim: "Apply now: https://forms.gle/... or call on
+    +918854996448" — informal WhatsApp-forward style. This is the classic
+    funnel for "internship" postings that are actually lead-generation for a
+    phone-sold paid training program: the applicant fills a generic form,
+    gets called, and the actual pitch (and money request) happens verbally,
+    off-platform — invisible to any text analysis of the original posting.
+    The form link + phone number is the only trace this leaves.
+
+    Weight: 0.60 when only one of (form link, phone handoff) is present;
+    escalates toward the hard-reject band when BOTH appear together, since
+    that combination has no ordinary legitimate explanation on an
+    aggregator platform that already provides its own apply flow.
+    """
+
+    rule_id = "external_form_handoff"
+
+    def __init__(self, config: Config | None = None) -> None:
+        self._cfg = config or _default_cfg
+
+    def evaluate(self, inp: RuleInput) -> RuleFinding:
+        base_w = self._cfg.rule_weights.external_form_handoff
+        form = inp.external_form_detected
+        phone = inp.personal_contact_handoff_detected
+
+        if form and phone:
+            # Both together: escalate weight (capped at 1.0) — this specific
+            # combination is what the real Zefrix example showed.
+            w = min(1.0, base_w + 0.25)
+            return RuleFinding(
+                rule_id=self.rule_id,
+                description="Off-platform form + personal phone handoff detected",
+                weight=w,
+                triggered=True,
+                explanation=(
+                    "Posting routes applicants to a generic third-party form AND a "
+                    "personal phone number instead of the platform's own apply flow — "
+                    "a classic funnel for phone-sold 'training program' scams disguised "
+                    "as internships, where the actual pitch happens verbally off-platform."
+                ),
+            )
+        if form or phone:
+            which = "a generic third-party form link" if form else "a personal phone-number handoff"
+            return RuleFinding(
+                rule_id=self.rule_id,
+                description="Off-platform form + personal phone handoff detected",
+                weight=base_w,
+                triggered=True,
+                explanation=(
+                    f"Posting includes {which} instead of relying on the platform's own "
+                    f"apply flow — worth reviewing, though not conclusive on its own."
+                ),
+            )
+        return RuleFinding(
+            rule_id=self.rule_id,
+            description="Off-platform form + personal phone handoff detected",
+            weight=base_w,
+            triggered=False,
+            explanation="No external form link or personal phone handoff detected.",
+        )
+
+
 class StipendPerkContradictionRule:
     """
     Rule 2: stipend_perk_consistency_check == True (inconsistency found)
@@ -341,6 +459,63 @@ class SharedInfrastructureRule:
             weight=w,
             triggered=False,
             explanation="No shared off-platform infrastructure detected.",
+        )
+
+
+class NgoFundraisingStipendNetworkRule:
+    """
+    Rule 3c: NGO/fundraising-sector posting whose exact lump-sum stipend
+    amount is shared by 3+ distinct companies in the corpus.
+
+    Empirical basis: on real scraped data, several "Foundation"-named
+    entities post under different role titles (Business Consultant, Program
+    Assistant, Fundraising, Crowdfunding) but share an identical lump-sum
+    stipend (e.g. ₹15,000) — a templated-payout signature that SBERT-based
+    text-duplicate detection does not catch, since each posting's wording
+    is independently written.
+
+    Deliberately scoped to lump-sum stipends only (not monthly, which
+    legitimately clusters around common round numbers across unrelated
+    real companies) and to NGO/fundraising-sector postings only — a
+    coincidental stipend match at an ordinary tech company is not this
+    signal.
+
+    Weight: 0.65 (default) — moderate, NOT a hard reject. Legitimate
+    fundraising-platform aggregators that standardize pay across multiple
+    NGO partners are a real business model too (same ambiguity already
+    documented for cross_company_duplicate's NayePankh/Basti Ki Pathshala
+    case) — this surfaces the pattern for human review, it does not
+    presume fraud.
+    """
+
+    rule_id = "ngo_fundraising_stipend_network"
+
+    def __init__(self, config: Config | None = None) -> None:
+        self._cfg = config or _default_cfg
+
+    def evaluate(self, inp: RuleInput) -> RuleFinding:
+        w = self._cfg.rule_weights.ngo_fundraising_stipend_network
+        if inp.ngo_stipend_network:
+            return RuleFinding(
+                rule_id=self.rule_id,
+                description="NGO/fundraising-sector coordinated stipend network detected",
+                weight=w,
+                triggered=True,
+                explanation=(
+                    f"This NGO/fundraising-sector posting shares its exact lump-sum "
+                    f"stipend amount with {inp.ngo_stipend_network_company_count} other "
+                    f"distinctly-named companies — a templated-payout pattern consistent "
+                    f"with a coordinated shell-NGO network, though also seen with "
+                    f"legitimate fundraising-platform aggregators. Recommend human review "
+                    f"of the company's registration/legitimacy."
+                ),
+            )
+        return RuleFinding(
+            rule_id=self.rule_id,
+            description="NGO/fundraising-sector coordinated stipend network detected",
+            weight=w,
+            triggered=False,
+            explanation="No coordinated NGO stipend network pattern detected.",
         )
 
 
@@ -746,10 +921,13 @@ def _default_rules(config: Config | None = None) -> list[Rule]:
     cfg = config or _default_cfg
     return [
         HardDisqualifyingSignalsRule(cfg),
+        GuaranteedOutcomeClaimRule(cfg),
+        ExternalFormHandoffRule(cfg),
         UpfrontFeeAndPayToWorkRule(cfg),
         StipendPerkContradictionRule(cfg),
         CrossCompanyDuplicateRule(cfg),
         SharedInfrastructureRule(cfg),
+        NgoFundraisingStipendNetworkRule(cfg),
         SuspiciousRecruiterContactRule(cfg),
         UrgencyAndPsychologicalPressureRule(cfg),
         ExtremeStipendOutlierRule(cfg),

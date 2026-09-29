@@ -9,12 +9,14 @@ Endpoints:
   - POST /score/batch     -> Batch-score a list of listings with cross-record graph/duplicate detection
   - POST /graph/analyze   -> Network topological metrics and coordinated cluster analysis
   - POST /explain         -> Human review report rendering and feature attribution breakdown
+  - POST /feedback        -> Record a moderator approve/reject decision (human-in-the-loop)
+  - GET  /feedback/stats  -> Progress toward calibration/supervised-model label thresholds
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from pydantic import BaseModel, Field
 
 try:
@@ -34,6 +36,10 @@ from scam_detector.features.graph_features import (
     compute_graph_network_metrics,
     company_network_risk_profile,
 )
+from scam_detector.feedback import FeedbackStore, ReviewFeedback, build_training_labels
+
+_CALIBRATION_MIN_SAMPLES = 50
+_SUPERVISED_MIN_SAMPLES = 200
 
 log = logging.getLogger("scam_detector.api")
 
@@ -153,6 +159,50 @@ class BenchmarkSampleResponse(BaseModel):
     latency_ms_per_record: float
 
 
+class FeedbackRequest(BaseModel):
+    """
+    A moderator's real-world verdict on a previously-scored listing.
+
+    ``record_id`` must match the same id scam_detector used when scoring
+    the listing (its ``_id`` / MongoDB ObjectId string) — this is how a
+    future posting from the same company gets linked back to this verdict
+    via the reputation store.
+    """
+
+    record_id: str = Field(description="The listing's _id, exactly as scored")
+    moderator_decision: Literal["approve", "reject"] = Field(
+        description="approve = moderator confirms the listing is legitimate; "
+        "reject = moderator confirms it is a scam"
+    )
+    prior_pipeline_decision: Optional[Literal["clear", "review", "block"]] = Field(
+        default=None,
+        description="What scam_detector originally decided for this listing, "
+        "if known — distinguishes an overturned false-positive from a "
+        "moderator simply confirming a 'clear' listing.",
+    )
+    reviewer_notes: str = Field(default="", description="Free-text rationale, e.g. a rejection reason")
+
+
+class FeedbackResponse(BaseModel):
+    record_id: str
+    reviewer_decision: str
+    recorded_at: str
+    total_feedback_count: int
+    calibration_ready: bool
+    supervised_ready: bool
+    message: str
+
+
+class FeedbackStatsResponse(BaseModel):
+    total_labeled: int
+    scam_count: int
+    legit_count: int
+    calibration_min_required: int
+    supervised_min_required: int
+    calibration_ready: bool
+    supervised_ready: bool
+
+
 # ---------------------------------------------------------------------------
 # FastAPI App Factory
 # ---------------------------------------------------------------------------
@@ -207,10 +257,10 @@ def create_app() -> Any:
                 scam_score=float(scored.get("scam_score", 0.0)),
                 decision=str(scored.get("decision", "clear")),
                 confidence=float(scored.get("confidence", 1.0)),
-                confidence_level="high" if scored.get("confidence", 1.0) >= 0.7 else ("medium" if scored.get("confidence", 1.0) >= 0.4 else "low"),
+                confidence_level=str(scored.get("confidence_level", "high")),
                 explanation_summary=str(scored.get("explanation_summary", "")),
                 triggered_rules=list(scored.get("triggered_rules", [])),
-                top_contributing_features=[],
+                top_contributing_features=list(scored.get("top_contributing_features", [])),
                 shared_infrastructure=bool(scored.get("shared_infrastructure", False)),
                 duplicate_cluster_network_size=int(scored.get("duplicate_cluster_network_size", 1)),
             )
@@ -350,6 +400,90 @@ def create_app() -> Any:
             recall=round(rec, 4),
             f1_score=round(f1, 4),
             latency_ms_per_record=round(elapsed_ms / max(1, total), 2),
+        )
+
+    @app.post("/feedback", response_model=FeedbackResponse)
+    def record_feedback(req: FeedbackRequest) -> FeedbackResponse:
+        """
+        Record a moderator's real verdict on a listing (human-in-the-loop).
+
+        This is the mechanism by which the system "learns" over time:
+        - Immediately: any FUTURE posting from the same company gets scored
+          via ``company_reputation_score``, which checks this feedback store
+          for a ``confirmed_scam`` tied to that company's past record_ids and
+          returns maximum risk — no retraining needed, works from the very
+          first labeled example.
+        - Over time: once enough labels accumulate, ``calibration_ready`` /
+          ``supervised_ready`` flip to True, at which point the (currently
+          dormant) calibration and supervised-model layers in ``config.py``
+          can be enabled to generalize beyond company identity.
+        """
+        try:
+            if req.moderator_decision == "reject":
+                reviewer_decision = "confirmed_scam"
+            elif req.prior_pipeline_decision in ("review", "block"):
+                reviewer_decision = "false_positive"
+            else:
+                reviewer_decision = "confirmed_legit"
+
+            store = FeedbackStore(cfg.feedback.store_path)
+            event = store.record_feedback(
+                ReviewFeedback(
+                    record_id=req.record_id,
+                    reviewer_decision=reviewer_decision,
+                    reviewer_notes=req.reviewer_notes,
+                )
+            )
+
+            history = store.load_feedback_history()
+            labeled_df = build_training_labels(history)
+            total = len(labeled_df)
+            scam_count = int((labeled_df["label"] == 1).sum()) if total else 0
+            legit_count = total - scam_count
+            calibration_ready = total >= _CALIBRATION_MIN_SAMPLES
+            supervised_ready = (
+                total >= _SUPERVISED_MIN_SAMPLES
+                and min(scam_count, legit_count) >= 0.20 * total
+            )
+
+            return FeedbackResponse(
+                record_id=event.record_id,
+                reviewer_decision=event.reviewer_decision,
+                recorded_at=event.timestamp.isoformat(),
+                total_feedback_count=total,
+                calibration_ready=calibration_ready,
+                supervised_ready=supervised_ready,
+                message=(
+                    f"Recorded as '{reviewer_decision}'. "
+                    f"{total} labeled examples so far "
+                    f"({scam_count} scam, {legit_count} legit)."
+                ),
+            )
+        except Exception as exc:
+            log.exception("Error recording feedback: %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc))
+
+    @app.get("/feedback/stats", response_model=FeedbackStatsResponse)
+    def get_feedback_stats() -> FeedbackStatsResponse:
+        store = FeedbackStore(cfg.feedback.store_path)
+        history = store.load_feedback_history()
+        labeled_df = build_training_labels(history)
+        total = len(labeled_df)
+        scam_count = int((labeled_df["label"] == 1).sum()) if total else 0
+        legit_count = total - scam_count
+        calibration_ready = total >= _CALIBRATION_MIN_SAMPLES
+        supervised_ready = (
+            total >= _SUPERVISED_MIN_SAMPLES
+            and min(scam_count, legit_count) >= 0.20 * total
+        )
+        return FeedbackStatsResponse(
+            total_labeled=total,
+            scam_count=scam_count,
+            legit_count=legit_count,
+            calibration_min_required=_CALIBRATION_MIN_SAMPLES,
+            supervised_min_required=_SUPERVISED_MIN_SAMPLES,
+            calibration_ready=calibration_ready,
+            supervised_ready=supervised_ready,
         )
 
     return app

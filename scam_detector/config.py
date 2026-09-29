@@ -52,6 +52,9 @@ class RuleWeights(BaseModel):
     -------------------------
     hard_disqualifying_signals : 0.95  — near-automatic escalation to human
                                          review; only 1 other signal can override
+    guaranteed_outcome_claim    : 0.85  — "100% guaranteed placement", "no
+                                         interview" — legitimate internships
+                                         never make these claims
     cross_company_duplicate     : 0.80  — same script / multiple shells is the
                                          strongest single fraud indicator
     typosquat_domain            : 0.70  — off-platform mismatch is strong
@@ -64,10 +67,13 @@ class RuleWeights(BaseModel):
     """
 
     hard_disqualifying_signals: float = Field(default=0.95, ge=0.0, le=1.0)
+    guaranteed_outcome_claim: float = Field(default=0.85, ge=0.0, le=1.0)
+    external_form_handoff: float = Field(default=0.60, ge=0.0, le=1.0)
     upfront_fee_and_pay_to_work: float = Field(default=0.90, ge=0.0, le=1.0)
     cross_company_duplicate: float = Field(default=0.80, ge=0.0, le=1.0)
     typosquat_domain: float = Field(default=0.70, ge=0.0, le=1.0)
     shared_infrastructure: float = Field(default=0.65, ge=0.0, le=1.0)
+    ngo_fundraising_stipend_network: float = Field(default=0.65, ge=0.0, le=1.0)
     suspicious_recruiter_contact: float = Field(default=0.50, ge=0.0, le=1.0)
     extreme_stipend_outlier: float = Field(default=0.45, ge=0.0, le=1.0)
     urgency_psychological_pressure: float = Field(default=0.45, ge=0.0, le=1.0)
@@ -94,6 +100,10 @@ class RuleThresholds(BaseModel):
     # UrgencyAndPsychologicalPressureRule thresholds
     urgency_score_threshold: float = Field(default=0.65, ge=0.0, le=1.0)
     emotional_manipulation_threshold: float = Field(default=0.50, ge=0.0, le=1.0)
+
+    # NgoFundraisingStipendNetworkRule: minimum distinct companies sharing
+    # the exact same lump-sum stipend amount to flag a coordinated network
+    ngo_stipend_min_distinct_companies: int = Field(default=3, ge=2)
 
     # Minimum peer group size required to compute stable z-scores
     min_peer_group_size: int = Field(
@@ -236,6 +246,15 @@ class ReputationConfig(BaseModel):
     )
 
 
+class FeedbackConfig(BaseModel):
+    """Configuration for the human-review feedback store (feedback.py)."""
+
+    store_path: str = Field(
+        default="scam_detector/feedback.jsonl",
+        description="Path to the append-only JSONL review-feedback store",
+    )
+
+
 class AnomalyConfig(BaseModel):
     """Configuration for unsupervised anomaly model and explanations."""
 
@@ -261,6 +280,7 @@ class Config(BaseModel):
     supervised: SupervisedModelConfig = Field(default_factory=SupervisedModelConfig)
     calibration: CalibrationConfig = Field(default_factory=CalibrationConfig)
     reputation: ReputationConfig = Field(default_factory=ReputationConfig)
+    feedback: FeedbackConfig = Field(default_factory=FeedbackConfig)
     anomaly: AnomalyConfig = Field(default_factory=AnomalyConfig)
     flags: FeatureFlags = Field(default_factory=FeatureFlags)
 

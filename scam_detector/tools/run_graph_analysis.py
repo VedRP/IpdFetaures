@@ -1,7 +1,7 @@
 """
 run_graph_analysis.py
 ---------------------
-Run graph-based analysis on the three data sources (Internshala, Unstop, and Kaggle sample)
+Run graph-based analysis on the data sources (Internshala and Unstop)
 to detect coordinate posting networks and export visualizations/GraphML.
 """
 
@@ -12,7 +12,6 @@ import os
 import sys
 import logging
 from pathlib import Path
-import pandas as pd
 import networkx as nx
 
 # Ensure stdout handles UTF-8 on Windows
@@ -40,40 +39,6 @@ ARTIFACT_DIR = Path(
     )
 )
 ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
-
-
-def map_kaggle_row_to_ifind_schema(r: dict, idx: int) -> dict:
-    company = str(r.get("company_name", "Unknown Company"))
-    domain_name = company.lower().replace(" ", "").replace(",", "").replace(".", "").replace("-", "")
-    
-    # Financial / upfront payment indicators
-    summary_parts = []
-    if r.get("payment_required") == 1 or (r.get("registration_fee") or 0) > 0:
-        fee = r.get("registration_fee", 0)
-        summary_parts.append(f"Upfront payment required: registration fee ₹{fee}. Bank account transfer required.")
-    if r.get("fake_certificate_offer") == 1:
-        summary_parts.append("Guaranteed internship certificate provided upon payment.")
-    if r.get("vague_description_score", 0) > 40:
-        summary_parts.append("Generic work from home online role with minimal skill requirement.")
-    if r.get("phishing_language_score", 0) > 30:
-        summary_parts.append("Urgent hiring! Submit Aadhaar card, PAN card, and banking credentials immediately via WhatsApp.")
-    if r.get("urgency_score", 0) > 40:
-        summary_parts.append("Immediate opening! Apply within 2 hours to secure placement.")
-        
-    summary = " ".join(summary_parts) if summary_parts else f"Internship opportunity for {r.get('internship_title', 'Role')} at {r.get('company_name', 'Company')}."
-
-    email_type = r.get("recruiter_email_type", "Corporate")
-    is_suspicious_email = (r.get("suspicious_email_domain") == 1) or (email_type == "Free")
-    apply_link = f"http://{domain_name}-careers-free.xyz/apply" if is_suspicious_email else f"https://www.{domain_name}.com/careers"
-
-    return {
-        "_id": f"kaggle_{idx}_{r.get('posting_date', '2026-01-01')}",
-        "name": r.get("internship_title", "Intern"),
-        "company": company,
-        "applyLink": apply_link,
-        "summary": summary,
-        "source": "kaggle_internship",
-    }
 
 
 def analyze_dataset(name: str, records: list[dict]) -> None:
@@ -163,17 +128,6 @@ def main() -> None:
         analyze_dataset("Unstop", records)
     else:
         print(f"Unstop dataset not found at {unstop_path}")
-
-    # ── Source 3: Kaggle Sample ──
-    kaggle_path = root_dir / "fake_internship_detection_dataset.csv"
-    if kaggle_path.exists():
-        print("\nLoading Kaggle dataset (sampling 2,000 records)...")
-        df = pd.read_csv(kaggle_path)
-        sample_df = df.sample(n=2000, random_state=42)
-        records = [map_kaggle_row_to_ifind_schema(row.to_dict(), idx) for idx, row in sample_df.iterrows()]
-        analyze_dataset("Kaggle Sample", records)
-    else:
-        print(f"Kaggle dataset not found at {kaggle_path}")
 
 
 if __name__ == "__main__":

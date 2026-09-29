@@ -21,6 +21,11 @@ from scam_detector.scoring.rules_engine import RuleFinding, RulesResult
 
 _HARD_DISQUALIFYING_RULE_ID = "hard_disqualifying_signals"
 
+# Cap on how many (feature, contribution) pairs surface in reviewer-facing
+# reports / API responses — the anomaly model's explain() returns the full
+# ~49-feature vector, which is not "top" anything without this cap.
+_TOP_CONTRIBUTING_FEATURES_LIMIT = 8
+
 
 # ---------------------------------------------------------------------------
 # Legacy supervised-ML stub (optional; not the Phase 5 blend path)
@@ -388,9 +393,14 @@ class RiskEngine:
 
         contributions: list[tuple[str, float]]
         if feature_contributions is not None:
-            contributions = [
+            # feature_contributions holds the FULL feature vector (all ~49
+            # features, many at 0.0) — rank by absolute impact and cap to a
+            # legible top-N rather than dumping everything into the report.
+            all_contributions = [
                 (str(name), float(val)) for name, val in feature_contributions
             ]
+            all_contributions.sort(key=lambda item: abs(item[1]), reverse=True)
+            contributions = all_contributions[:_TOP_CONTRIBUTING_FEATURES_LIMIT]
         else:
             # Fall back to triggered rule weights as contributing signals
             contributions = [

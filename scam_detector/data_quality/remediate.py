@@ -295,6 +295,36 @@ def flag_missing_deadline(record: dict[str, Any]) -> tuple[dict[str, Any], Flags
     return record, flags
 
 
+def flag_openings_defaulted(record: dict[str, Any]) -> tuple[dict[str, Any], Flags]:
+    """
+    Flag listings where ``openings`` equals 1 — the scraper's universal
+    fallback default (``format_internship._extract_openings``) when no real
+    opening count could be scraped from the source platform.
+
+    Empirically, 100% of a real 2,010-record corpus (Internshala + Unstop)
+    show ``openings == 1``, which is not plausible as a genuine value for
+    every single posting — it is a scraper limitation, not real data. An
+    ``openings_zscore`` computed over a field with zero real variance is
+    silently and confidently wrong (a fake "no anomaly here" signal), which
+    is worse than treating it as unknown. This mirrors the existing
+    ``deadline_missing`` philosophy: unknown, not silently safe.
+
+    The value is **not altered** — downstream code decides whether to
+    disable openings-based features entirely.
+
+    Flags emitted
+    -------------
+    ``openings_defaulted`` : True
+    """
+    flags: Flags = {}
+    openings = record.get("openings")
+
+    if openings == 1:
+        flags["openings_defaulted"] = True
+
+    return record, flags
+
+
 # ---------------------------------------------------------------------------
 # Fix 4 — clean_responsibilities
 # ---------------------------------------------------------------------------
@@ -439,6 +469,7 @@ _FIXES = (
     flag_mislabeled_company,
     flag_degree_default,
     flag_missing_deadline,
+    flag_openings_defaulted,
     clean_responsibilities,
     flag_truncated_summary,
     flag_inferred_date,

@@ -566,3 +566,119 @@ def extract_company_url_features(
 
     return CompanyUrlFeatureVector(company=company_feats, url=url_feats)
 
+
+
+# ---------------------------------------------------------------------------
+# NGO / fundraising-sector coordinated stipend network detection
+# ---------------------------------------------------------------------------
+#
+# Empirical finding (real Internshala + Unstop data): 7 distinct company
+# names — several plausible-sounding "Foundation" entities among them — post
+# under DIFFERENT role titles (Business Consultant, Program Assistant,
+# Fundraising, Crowdfunding, Social Entrepreneurship) but share the *exact
+# same* lump-sum stipend amount (₹15,000). SBERT-based duplicate detection
+# (0.92 cosine threshold) does NOT catch this — the posting text is
+# independently written per "company", only the underlying stipend template
+# is identical. This is a distinct, complementary signal: same operator (or
+# same aggregator platform) running multiple NGO-sounding fronts with a
+# templated pay structure, rather than a copy-pasted script.
+#
+# Deliberately scoped to lump_sum paid stipends only (not monthly), since
+# monthly stipends legitimately cluster around common round numbers
+# (₹5,000/₹10,000 per month) across totally unrelated real companies —
+# lump-sum is a rarer, more specific structure where exact-amount collisions
+# across "different" companies are far less likely to be coincidental.
+#
+# Per the same philosophy already documented in duplicate_detection.py's
+# NayePankh/Basti Ki Pathshala note: this is a known ambiguity (legitimate
+# fundraising-platform aggregators standardizing pay across NGO partners are
+# a real, non-fraudulent business model too) — surface it for human review,
+# do not treat it as an automatic hard reject.
+
+_NGO_SECTOR_KEYWORDS: list[str] = [
+    "ngo", "foundation", "trust", "society", "nonprofit", "non-profit",
+    "non profit", "charity", "welfare", "fundraising", "fundraiser",
+    "crowdfunding", "social work", "social entrepreneurship", "csr",
+    "philanthropy", "ngo internship",
+]
+
+
+def is_ngo_or_fundraising_sector(record: dict[str, Any]) -> bool:
+    """
+    Return True when the posting's company name, title, or tags indicate an
+    NGO / fundraising / social-sector internship.
+
+    Deliberately broad substring matching — this is a SECTOR classifier, not
+    a fraud signal on its own. It only matters combined with
+    ``ngo_stipend_network_flag``.
+    """
+    company = str(record.get("company") or "").lower()
+    title = str(record.get("name") or record.get("title") or "").lower()
+    tags = record.get("tags") or []
+    tags_text = " ".join(str(t) for t in tags).lower() if isinstance(tags, list) else str(tags).lower()
+
+    haystack = f"{company} {title} {tags_text}"
+    return any(kw in haystack for kw in _NGO_SECTOR_KEYWORDS)
+
+
+def build_lump_sum_stipend_index(
+    remediated_records: list[tuple[dict[str, Any], dict[str, Any]]],
+) -> dict[tuple[float, str], set[str]]:
+    """
+    Corpus-level index: (amount, currency) -> set of distinct company keys
+    posting a "paid" / "lump_sum" stipend at exactly that amount.
+
+    Parameters
+    ----------
+    remediated_records:
+        List of (record, flags) tuples — flags used to exclude companies
+        already known to be scraper noise (``company_suspect``) from the
+        distinct-company count, so category-leak artifacts (e.g. a company
+        field literally reading "Social Work") don't inflate the signal.
+    """
+    index: dict[tuple[float, str], set[str]] = defaultdict(set)
+    for rec, flags in remediated_records:
+        if flags.get("company_suspect"):
+            continue
+        stipend = rec.get("stipend") or {}
+        if not isinstance(stipend, dict):
+            continue
+        if stipend.get("type") != "paid" or stipend.get("period") != "lump_sum":
+            continue
+        amount = stipend.get("amount")
+        if not amount or not isinstance(amount, (int, float)) or amount <= 0:
+            continue
+        currency = str(stipend.get("currency") or "INR")
+        company_key = (rec.get("company") or "").strip().lower()
+        if not company_key:
+            continue
+        index[(float(amount), currency)].add(company_key)
+    return index
+
+
+def ngo_stipend_network_flag(
+    record: dict[str, Any],
+    stipend_index: dict[tuple[float, str], set[str]],
+    *,
+    min_distinct_companies: int = 3,
+) -> tuple[bool, int]:
+    """
+    Return (flagged, distinct_company_count) for this record's stipend
+    template network.
+
+    Flagged when at least ``min_distinct_companies`` distinct (non-suspect)
+    companies in the corpus share this record's exact lump-sum stipend
+    amount — a coordinated-payout-template signal, independent of text
+    similarity.
+    """
+    stipend = record.get("stipend") or {}
+    if not isinstance(stipend, dict) or stipend.get("type") != "paid" or stipend.get("period") != "lump_sum":
+        return False, 0
+    amount = stipend.get("amount")
+    if not amount or not isinstance(amount, (int, float)) or amount <= 0:
+        return False, 0
+    currency = str(stipend.get("currency") or "INR")
+
+    companies = stipend_index.get((float(amount), currency), set())
+    count = len(companies)
+    return count >= min_distinct_companies, count

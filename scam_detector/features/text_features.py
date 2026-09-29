@@ -101,6 +101,13 @@ class TextFeatureVector(BaseModel):
     # 6. Sensitive info request (near-hard disqualifying signal)
     sensitive_info_requested: bool = Field(default=False)
 
+    # 6b. Guaranteed-outcome / no-interview marketing claim (near-hard disqualifying signal)
+    guaranteed_outcome_claim: bool = Field(default=False)
+
+    # 6c. Off-platform form/phone handoff (near-hard disqualifying signal)
+    external_form_detected: bool = Field(default=False)
+    personal_contact_handoff_detected: bool = Field(default=False)
+
     # 7. Boilerplate / near-duplicate similarity
     boilerplate_similarity: float = Field(default=0.0, ge=0.0, le=1.0)
     scam_corpus_similarity: float = Field(default=0.0, ge=0.0, le=1.0)
@@ -259,8 +266,13 @@ _GENERIC_TITLES: list[str] = [
     "Software Development",
     "Web Development",
     "App Development",
-    "Internship",
-    "Intern",
+    # NOTE: bare "Internship" / "Intern" deliberately excluded — every record
+    # in this domain is an internship posting, so those words are present in
+    # nearly every title regardless of specificity. With token_set_ratio, a
+    # single-word generic entry that appears in almost all titles saturates
+    # genericity_score to 1.0 universally (e.g. "Data Science Intern at
+    # Google-scale ML team" scored maximally "generic" purely from "Intern"),
+    # destroying the signal's ability to discriminate vague vs specific roles.
 ]
 
 _GENERIC_TITLES_LC: list[str] = [t.lower() for t in _GENERIC_TITLES]
@@ -442,7 +454,13 @@ _SENSITIVE_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\brefundable\s+deposit\b",                      re.I),
     re.compile(r"\bpay\b.{0,30}\b(to\s+)?(join|start|confirm|register|proceed)\b",
                re.I | re.S),
-    re.compile(r"\bpay\b.{0,20}\b(fee|amount|charge|deposit)\b", re.I | re.S),
+    # "charge" deliberately excluded from this generic proximity match — it is
+    # heavily overloaded in legitimate business text (EV/phone charging, "in
+    # charge of"), causing false positives (e.g. "scan, pay, charge experience"
+    # in an EV-charging company's product description). registration/processing
+    # charge wording is still covered by the explicit patterns below.
+    re.compile(r"\bpay\b.{0,20}\b(fee|amount|deposit)\b", re.I | re.S),
+    re.compile(r"\b(registration|processing)\s+charges?\b", re.I),
     re.compile(r"\bbank\s+(account|details|number|transfer)\b",  re.I),
     re.compile(r"\bupi\s+(id|payment|transfer)\b",               re.I),
     re.compile(r"\baadh?a?ar\b",                                  re.I),
@@ -478,6 +496,126 @@ def sensitive_info_request_detector(text: str) -> bool:
     if not text or not text.strip():
         return False
     return any(pattern.search(text) for pattern in _SENSITIVE_PATTERNS)
+
+
+# ---------------------------------------------------------------------------
+# 6b. guaranteed_outcome_claim_detector
+# ---------------------------------------------------------------------------
+
+# ⚠️  NEAR-HARD DISQUALIFYING SIGNAL — documented for downstream scoring.
+#
+# Legitimate internships never legally guarantee a job/placement/certificate
+# outcome, and never skip an interview/screening step entirely. These claims
+# are a marketing hook scammers front-load into the title/summary/perks — the
+# part of a posting that survives scraper truncation — unlike fee/payment
+# details, which are usually further down and get cut off. This makes this
+# detector one of the few real-data-effective hard signals available today.
+_GUARANTEE_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"\b(100\s*%|hundred\s+percent)\s*(job\s+)?(placement|guarantee|guaranteed)\b", re.I),
+    re.compile(r"\bguaranteed\s+(job|placement|internship|offer|stipend|certificate|ppo)\b", re.I),
+    re.compile(r"\bassured\s+(job|placement|internship|offer|certificate|ppo)\b", re.I),
+    re.compile(r"\bno\s+interview(s)?\s*(required|needed)?\b", re.I),
+    re.compile(r"\bwithout\s+(any\s+)?interview\b", re.I),
+    re.compile(r"\binstant\s+(selection|hiring|offer|joining|registration)\b", re.I),
+    re.compile(r"\bselected?\s+(instantly|immediately)\b", re.I),
+    re.compile(r"\bwhatsapp\s+(only|number|group)\b", re.I),
+    re.compile(r"\btelegram\s+(group|channel|link)\b", re.I),
+    re.compile(r"\brefer\s+and\s+earn\b", re.I),
+    re.compile(r"\bearn\s+(upto|up\s+to)\s*(rs\.?|inr|₹)\s*\d+.{0,20}\bfrom\s+home\b", re.I),
+    re.compile(r"\bno\s+(skills?|experience)\s+(required|needed).{0,20}\b(guaranteed|assured|100\s*%)\b", re.I),
+    re.compile(r"\bwork\s+2\s*[-–]?\s*3\s+hours?.{0,20}\bearn\b", re.I),
+]
+
+
+def guaranteed_outcome_claim_detector(text: str) -> bool:
+    """
+    Binary flag: does the posting make a guaranteed-outcome or
+    skip-the-interview marketing claim typical of fraudulent postings?
+
+    ⚠️  NEAR-HARD DISQUALIFYING SIGNAL — same treatment as
+    ``sensitive_info_request_detector``: downstream scoring must apply a
+    score floor / hard cap, not blend this as a soft weighted feature.
+
+    Parameters
+    ----------
+    text:
+        Combined posting text (title + summary + responsibilities + perks +
+        tags) — deliberately wider than ``sensitive_info_request_detector``'s
+        input, since these claims are usually front-loaded as a hook rather
+        than buried in a payment-details paragraph.
+
+    Returns
+    -------
+    bool
+        ``True`` → guaranteed-outcome / no-interview claim detected.
+    """
+    if not text or not text.strip():
+        return False
+    return any(pattern.search(text) for pattern in _GUARANTEE_PATTERNS)
+
+
+# ---------------------------------------------------------------------------
+# 6c. external_form_and_phone_handoff_detector
+# ---------------------------------------------------------------------------
+#
+# Real-data basis: a posting for "Zefrix" (company field corrupted to
+# "Content" by the scraper) reads, verbatim: "Apply now:
+# https://forms.gle/MoCTSfEVCwL3GB2n7 or call on +918854996448" — written in
+# informal WhatsApp-forward style (emoji, asterisk/underscore markdown).
+#
+# This is a distinct, well-known scam funnel: the listing routes the
+# applicant AWAY from the platform's own apply flow into a generic
+# third-party form (which harvests contact details with no real ATS/company
+# behind it), followed by a personal phone call — where the actual pitch
+# (a paid "training program" sold as an internship) happens verbally, off
+# the platform, invisible to any text-mining of the original posting. The
+# Google Form + phone number combination is the only trace this leaves in
+# scrapable text.
+#
+# No legitimate internship on an aggregator platform needs a SECOND,
+# generic, unbranded form outside the platform's own application system —
+# a real employer's ATS or company careers page would appear instead, not a
+# bare forms.gle/typeform.com link.
+
+_EXTERNAL_FORM_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"forms\.gle/\S+", re.I),
+    re.compile(r"docs\.google\.com/forms/\S+", re.I),
+    re.compile(r"forms\.office\.com/\S+", re.I),
+    re.compile(r"typeform\.com/\S+", re.I),
+    re.compile(r"tally\.so/\S+", re.I),
+    re.compile(r"jotform\.com/\S+", re.I),
+    re.compile(r"forms\.zoho\.\S+", re.I),
+    re.compile(r"\bgoogle\s+form\b", re.I),
+]
+
+# Indian mobile number (10 digits, starts 6-9, optional +91/91 prefix),
+# required to appear near a contact-invitation verb to avoid matching an
+# unrelated 10-digit number elsewhere in the text.
+_PERSONAL_CONTACT_PATTERN = re.compile(
+    r"\b(?:call|contact|whatsapp|dm|message|ping)\b.{0,20}"
+    r"(?:\+?91[\-\s]?)?[6-9]\d{9}\b"
+    r"|\b(?:\+?91[\-\s]?)?[6-9]\d{9}\b.{0,20}\b(?:call|contact|whatsapp|dm|message)\b",
+    re.I | re.S,
+)
+
+
+def external_form_and_phone_handoff_detector(text: str) -> tuple[bool, bool]:
+    """
+    Detect a listing that funnels applicants off-platform via a generic
+    third-party form link and/or a personal phone-number handoff.
+
+    Returns
+    -------
+    (external_form_detected, personal_contact_detected)
+        Either can be True independently. The combination of both is the
+        strongest version of this signal (see
+        ``ExternalFormHandoffRule`` docstring) but each is meaningful alone.
+    """
+    if not text or not text.strip():
+        return False, False
+    form_detected = any(p.search(text) for p in _EXTERNAL_FORM_PATTERNS)
+    contact_detected = bool(_PERSONAL_CONTACT_PATTERN.search(text))
+    return form_detected, contact_detected
 
 
 # ---------------------------------------------------------------------------
@@ -644,8 +782,19 @@ def extract_text_features(
     else:
         resp_text = str(responsibilities_raw)
 
+    perks_raw = record.get("perks") or []
+    perks_text = " ".join(str(p) for p in perks_raw if p) if isinstance(perks_raw, list) else str(perks_raw)
+    tags_raw = record.get("tags") or []
+    tags_text = " ".join(str(t) for t in tags_raw if t) if isinstance(tags_raw, list) else str(tags_raw)
+
     # Full body text for multi-field analysers
     full_text = " ".join(filter(None, [title, summary, resp_text]))
+
+    # Wider scan window for hard-disqualifying pattern detectors: scammers
+    # front-load hooks (guarantees, WhatsApp/Telegram handoffs) into the
+    # title/perks/tags, which survive scraper summary-truncation better than
+    # payment details buried mid-paragraph.
+    pattern_scan_text = " ".join(filter(None, [title, summary, resp_text, perks_text, tags_text]))
 
     # Remediation pass-through flags (may come from the flags dict or be
     # embedded directly on the record by the pipeline)
@@ -669,8 +818,14 @@ def extract_text_features(
     body_text = " ".join(filter(None, [summary, resp_text]))
     rg = readability_and_grammar_signals(body_text)
 
-    # 6. Sensitive info request (summary + responsibilities only)
-    sensitive = sensitive_info_request_detector(body_text)
+    # 6. Sensitive info request (widened scan window — see pattern_scan_text)
+    sensitive = sensitive_info_request_detector(pattern_scan_text)
+
+    # 6b. Guaranteed-outcome / no-interview marketing claim
+    guarantee_claim = guaranteed_outcome_claim_detector(pattern_scan_text)
+
+    # 6c. Off-platform external form / personal phone handoff
+    external_form_detected, personal_contact_detected = external_form_and_phone_handoff_detector(pattern_scan_text)
 
     # 7. Scam corpus similarity
     scam_sim = scam_corpus_similarity(full_text, scam_embeddings)
@@ -689,6 +844,9 @@ def extract_text_features(
         flesch_score=float(rg["flesch_score"]),
         artifact_count=int(rg["artifact_count"]),
         sensitive_info_requested=sensitive,
+        guaranteed_outcome_claim=guarantee_claim,
+        external_form_detected=external_form_detected,
+        personal_contact_handoff_detected=personal_contact_detected,
         boilerplate_similarity=0.0,   # injected by duplicate-detection stage
         scam_corpus_similarity=scam_sim,
         summary_truncated=summary_truncated,

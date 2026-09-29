@@ -400,9 +400,22 @@ class TestSourceConditionedConfidence:
             config=cfg_disabled,
         )
 
+        # Expected values depend on whether the optional sentence-transformers
+        # dependency is installed: compute_confidence_score applies an extra
+        # *0.80 penalty when it's missing (see its SBERT-availability check).
+        # Hardcoding one environment's constants here made this test flake
+        # depending on the machine it ran on — derive the multiplier instead.
+        from scam_detector.features.text_features import _sbert_model
+        sbert_penalty = 1.0 if _sbert_model() is not None else 0.80
+
+        # completeness (0.50) * (global_target 0.75 / source mean 0.50) = 0.75
+        expected_conditioned = round(0.75 * sbert_penalty, 4)
+        # source-conditioning disabled → completeness passes through unscaled
+        expected_disabled = round(0.50 * sbert_penalty, 4)
+
         assert score_conditioned > score_disabled
-        assert abs(score_conditioned - 0.60) < 1e-4
-        assert abs(score_disabled - 0.40) < 1e-4
+        assert abs(score_conditioned - expected_conditioned) < 1e-4
+        assert abs(score_disabled - expected_disabled) < 1e-4
 
         clear_baselines_cache()
 

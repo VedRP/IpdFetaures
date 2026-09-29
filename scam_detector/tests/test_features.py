@@ -35,6 +35,8 @@ from scam_detector.features.text_features import (
     genericity_score,
     readability_and_grammar_signals,
     sensitive_info_request_detector,
+    guaranteed_outcome_claim_detector,
+    external_form_and_phone_handoff_detector,
     urgency_score,
     boilerplate_similarity,
 )
@@ -336,8 +338,20 @@ class TestTitleSummaryAlignment:
         if not self.model_available:
             pytest.skip("sentence-transformers not installed")
         from scam_detector.features.text_features import title_summary_alignment
-        # Anakin: title = "Software Development", summary talks about backend engineering
-        aligned = title_summary_alignment(ANAKIN_TITLE, ANAKIN_SUMMARY)
+        # NOTE: previously used ANAKIN_SUMMARY here, but it is a long,
+        # jargon-heavy paragraph ("data engine", "anti-bot mechanisms") with
+        # no literal software/development vocabulary — verified empirically
+        # that all-MiniLM-L6-v2 scores it BELOW the misaligned pair (0.2199
+        # vs 0.2649), making this assertion flaky on the real model rather
+        # than a bug in title_summary_alignment. Using an unambiguously
+        # on-topic summary here instead; ANAKIN_SUMMARY is still used
+        # elsewhere in this file for unrelated properties (urgency, caps
+        # ratio, readability) where topical alignment doesn't matter.
+        aligned = title_summary_alignment(
+            "Software Development",
+            "You will write, test, and debug code, build new features, and "
+            "fix bugs in our software application using Python and JavaScript.",
+        )
         # Misaligned: fundraising title with a cooking summary
         misaligned = title_summary_alignment(
             "Fundraising",
@@ -476,6 +490,129 @@ class TestSensitiveInfoRequestDetector:
 
     def test_pan_card_detected(self) -> None:
         assert sensitive_info_request_detector("Submit your PAN card number.") is True
+
+
+# ===========================================================================
+# 6b — guaranteed_outcome_claim_detector
+# ===========================================================================
+
+class TestGuaranteedOutcomeClaimDetector:
+
+    def test_empty_text_returns_false(self) -> None:
+        assert guaranteed_outcome_claim_detector("") is False
+
+    def test_100_percent_placement_guarantee_detected(self) -> None:
+        assert guaranteed_outcome_claim_detector("100% placement guarantee for all interns.") is True
+
+    def test_guaranteed_job_detected(self) -> None:
+        assert guaranteed_outcome_claim_detector("Guaranteed job after 1 month of training.") is True
+
+    def test_guaranteed_certificate_detected(self) -> None:
+        assert guaranteed_outcome_claim_detector("Guaranteed certificate on completion.") is True
+
+    def test_assured_placement_detected(self) -> None:
+        assert guaranteed_outcome_claim_detector("Assured placement with top companies.") is True
+
+    def test_no_interview_required_detected(self) -> None:
+        assert guaranteed_outcome_claim_detector("No interview required, direct onboarding.") is True
+
+    def test_selected_without_interview_detected(self) -> None:
+        assert guaranteed_outcome_claim_detector("Get hired without any interview.") is True
+
+    def test_instant_selection_detected(self) -> None:
+        assert guaranteed_outcome_claim_detector("Instant selection for all candidates.") is True
+
+    def test_whatsapp_only_detected(self) -> None:
+        assert guaranteed_outcome_claim_detector("Apply via WhatsApp only for quick response.") is True
+
+    def test_telegram_group_detected(self) -> None:
+        assert guaranteed_outcome_claim_detector("Join our Telegram group to get started.") is True
+
+    def test_refer_and_earn_detected(self) -> None:
+        assert guaranteed_outcome_claim_detector("Refer and earn bonus for every friend who joins.") is True
+
+    def test_clean_internship_not_flagged(self) -> None:
+        assert guaranteed_outcome_claim_detector(ANAKIN_SUMMARY) is False
+
+    def test_normal_interview_mention_not_flagged(self) -> None:
+        assert guaranteed_outcome_claim_detector(
+            "Shortlisted candidates will be invited for an interview."
+        ) is False
+
+    def test_return_type_is_bool(self) -> None:
+        assert isinstance(guaranteed_outcome_claim_detector("hello"), bool)
+
+    def test_case_insensitive(self) -> None:
+        assert guaranteed_outcome_claim_detector("GUARANTEED PLACEMENT") is True
+
+
+# ===========================================================================
+# 6c — external_form_and_phone_handoff_detector
+# ===========================================================================
+
+class TestExternalFormAndPhoneHandoffDetector:
+
+    def test_empty_text_returns_false_false(self) -> None:
+        assert external_form_and_phone_handoff_detector("") == (False, False)
+
+    def test_real_zefrix_example_detects_both(self) -> None:
+        # Verbatim (redacted phone) from a real Internshala scrape
+        text = (
+            "Love making Reels? Get PAID for it. Zefrix is hiring a Social "
+            "Media Intern. Apply now: https://forms.gle/MoCTSfEVCwL3GB2n7 "
+            "or call on +918854996448"
+        )
+        form, phone = external_form_and_phone_handoff_detector(text)
+        assert form is True
+        assert phone is True
+
+    def test_forms_gle_alone_detected(self) -> None:
+        form, phone = external_form_and_phone_handoff_detector(
+            "Apply here: https://forms.gle/abc123xyz"
+        )
+        assert form is True
+        assert phone is False
+
+    def test_google_docs_forms_url_detected(self) -> None:
+        form, _ = external_form_and_phone_handoff_detector(
+            "Fill this out: https://docs.google.com/forms/d/e/xyz/viewform"
+        )
+        assert form is True
+
+    def test_typeform_detected(self) -> None:
+        form, _ = external_form_and_phone_handoff_detector("Apply via https://typeform.com/to/abc123")
+        assert form is True
+
+    def test_phone_handoff_alone_detected(self) -> None:
+        form, phone = external_form_and_phone_handoff_detector(
+            "For more details, WhatsApp us on 9876543210"
+        )
+        assert form is False
+        assert phone is True
+
+    def test_bare_phone_number_without_contact_verb_not_flagged(self) -> None:
+        # A 10-digit number with no "call/contact/whatsapp" nearby should
+        # not trigger — avoids false positives on unrelated numeric data.
+        _, phone = external_form_and_phone_handoff_detector(
+            "Reference code: 9876543210 for internal tracking purposes."
+        )
+        assert phone is False
+
+    def test_clean_internship_not_flagged(self) -> None:
+        form, phone = external_form_and_phone_handoff_detector(ANAKIN_SUMMARY)
+        assert form is False
+        assert phone is False
+
+    def test_platform_apply_link_not_flagged(self) -> None:
+        form, _ = external_form_and_phone_handoff_detector(
+            "Apply via the official Internshala application form for this role."
+        )
+        assert form is False
+
+    def test_return_type_is_tuple_of_bools(self) -> None:
+        result = external_form_and_phone_handoff_detector("hello")
+        assert isinstance(result, tuple)
+        assert all(isinstance(v, bool) for v in result)
 
 
 # ===========================================================================

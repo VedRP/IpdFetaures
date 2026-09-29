@@ -140,7 +140,17 @@ def openings_zscore(
     sigma = statistics.stdev(peer_vals)
 
     if sigma == 0.0:
-        return 0.0 if own_f == mu else None
+        # Peers have zero variance (e.g. a scraper field that never varies).
+        # Matching that degenerate constant is uninformative — we cannot tell
+        # anomalous from normal when nothing ever differs — so report
+        # unknown rather than a falsely confident "perfectly average" 0.0.
+        # But a record that DOES deviate from an otherwise-constant peer
+        # group is a genuine, strong signal (infinitely far from every
+        # peer), not something to discard as unknown.
+        if own_f == mu:
+            return None
+        sentinel = 10.0
+        return sentinel if own_f > mu else -sentinel
 
     return round((own_f - mu) / sigma, 4)
 
