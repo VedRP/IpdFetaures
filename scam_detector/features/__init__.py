@@ -26,6 +26,8 @@ from scam_detector.features.text_features import (
     sensitive_info_request_detector,
     guaranteed_outcome_claim_detector,
     external_form_and_phone_handoff_detector,
+    training_program_disguised_as_internship_detector,
+    zero_shot_scam_signal,
     boilerplate_similarity,
 )
 from scam_detector.features.company_features import (
@@ -258,5 +260,7 @@ __all__: list[str] = [
     "sensitive_info_request_detector",
     "guaranteed_outcome_claim_detector",
     "external_form_and_phone_handoff_detector",
+    "training_program_disguised_as_internship_detector",
+    "zero_shot_scam_signal",
     "boilerplate_similarity",
 ]

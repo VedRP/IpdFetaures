@@ -157,9 +157,9 @@ class TestUrgencyAndPsychologicalPressureRule:
 
 
 class TestRulesEngineIntegration:
-    def test_all_14_rules_registered_by_default(self) -> None:
+    def test_all_16_rules_registered_by_default(self) -> None:
         engine = RulesEngine()
-        assert len(engine._rules) == 14
+        assert len(engine._rules) == 16
         rule_ids = [r.rule_id for r in engine._rules]
         assert "upfront_fee_and_pay_to_work" in rule_ids
         assert "suspicious_recruiter_contact" in rule_ids
@@ -167,6 +167,8 @@ class TestRulesEngineIntegration:
         assert "guaranteed_outcome_claim" in rule_ids
         assert "ngo_fundraising_stipend_network" in rule_ids
         assert "external_form_handoff" in rule_ids
+        assert "training_program_disguised_as_internship" in rule_ids
+        assert "zero_shot_semantic_scam_signal" in rule_ids
 
     def test_hard_reject_triggered_by_upfront_fee(self) -> None:
         engine = RulesEngine()

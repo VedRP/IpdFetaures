@@ -42,6 +42,8 @@ from scam_detector.scoring.rules_engine import (
     HardDisqualifyingSignalsRule,
     GuaranteedOutcomeClaimRule,
     ExternalFormHandoffRule,
+    TrainingProgramDisguisedAsInternshipRule,
+    ZeroShotSemanticScamRule,
     NgoFundraisingStipendNetworkRule,
     StipendPerkContradictionRule,
     CrossCompanyDuplicateRule,
@@ -273,6 +275,138 @@ class TestExternalFormHandoffRule:
         rule = ExternalFormHandoffRule(config=_cfg(external_form_handoff=0.40))
         finding = rule.evaluate(RuleInput(external_form_detected=True))
         assert finding.weight == pytest.approx(0.40)
+
+    # ── Return type ───────────────────────────────────────────────────────
+
+    def test_returns_rule_finding_instance(self) -> None:
+        assert isinstance(self.rule.evaluate(_clean()), RuleFinding)
+
+
+# ===========================================================================
+# TestTrainingProgramDisguisedAsInternshipRule
+# ===========================================================================
+
+class TestTrainingProgramDisguisedAsInternshipRule:
+
+    def setup_method(self) -> None:
+        self.rule = TrainingProgramDisguisedAsInternshipRule()
+
+    # ── Trigger ───────────────────────────────────────────────────────────
+
+    def test_triggers_when_true(self) -> None:
+        inp = RuleInput(training_program_disguised_as_internship=True)
+        finding = self.rule.evaluate(inp)
+        assert finding.triggered is True
+
+    def test_triggered_rule_id_correct(self) -> None:
+        finding = self.rule.evaluate(RuleInput(training_program_disguised_as_internship=True))
+        assert finding.rule_id == "training_program_disguised_as_internship"
+
+    def test_triggered_weight_matches_config_default(self) -> None:
+        finding = self.rule.evaluate(RuleInput(training_program_disguised_as_internship=True))
+        assert finding.weight == pytest.approx(0.65)
+
+    # ── No-trigger ────────────────────────────────────────────────────────
+
+    def test_does_not_trigger_on_clean_input(self) -> None:
+        finding = self.rule.evaluate(_clean())
+        assert finding.triggered is False
+
+    def test_non_triggered_weight_still_set(self) -> None:
+        finding = self.rule.evaluate(_clean())
+        assert finding.weight == pytest.approx(0.65)
+
+    def test_non_triggered_explanation_non_empty(self) -> None:
+        assert self.rule.evaluate(_clean()).explanation != ""
+
+    # ── Weight configurability ────────────────────────────────────────────
+
+    def test_custom_weight_reflected_in_finding(self) -> None:
+        rule = TrainingProgramDisguisedAsInternshipRule(
+            config=_cfg(training_program_disguised_as_internship=0.30)
+        )
+        finding = rule.evaluate(RuleInput(training_program_disguised_as_internship=True))
+        assert finding.weight == pytest.approx(0.30)
+        assert finding.triggered is True
+
+    # ── Return type ───────────────────────────────────────────────────────
+
+    def test_returns_rule_finding_instance(self) -> None:
+        assert isinstance(self.rule.evaluate(_clean()), RuleFinding)
+
+
+# ===========================================================================
+# TestZeroShotSemanticScamRule
+# ===========================================================================
+
+class TestZeroShotSemanticScamRule:
+
+    def setup_method(self) -> None:
+        self.rule = ZeroShotSemanticScamRule()
+
+    # ── Trigger ───────────────────────────────────────────────────────────
+
+    def test_triggers_above_threshold(self) -> None:
+        inp = RuleInput(
+            zero_shot_scam_category="sells a paid training or certification course disguised as a job",
+            zero_shot_scam_confidence=0.75,
+        )
+        finding = self.rule.evaluate(inp)
+        assert finding.triggered is True
+
+    def test_triggered_rule_id_correct(self) -> None:
+        finding = self.rule.evaluate(
+            RuleInput(zero_shot_scam_category="some category", zero_shot_scam_confidence=0.80)
+        )
+        assert finding.rule_id == "zero_shot_semantic_scam_signal"
+
+    def test_triggered_weight_matches_config_default(self) -> None:
+        finding = self.rule.evaluate(
+            RuleInput(zero_shot_scam_category="some category", zero_shot_scam_confidence=0.80)
+        )
+        assert finding.weight == pytest.approx(0.55)
+
+    def test_explanation_includes_category_and_confidence(self) -> None:
+        finding = self.rule.evaluate(
+            RuleInput(zero_shot_scam_category="promises a guaranteed job", zero_shot_scam_confidence=0.85)
+        )
+        assert "promises a guaranteed job" in finding.explanation
+        assert "85%" in finding.explanation
+
+    # ── No-trigger ────────────────────────────────────────────────────────
+
+    def test_does_not_trigger_when_category_none(self) -> None:
+        finding = self.rule.evaluate(_clean())
+        assert finding.triggered is False
+
+    def test_does_not_trigger_below_threshold(self) -> None:
+        inp = RuleInput(zero_shot_scam_category="some category", zero_shot_scam_confidence=0.30)
+        finding = self.rule.evaluate(inp)
+        assert finding.triggered is False
+
+    def test_does_not_trigger_exactly_at_threshold_boundary_minus_epsilon(self) -> None:
+        inp = RuleInput(zero_shot_scam_category="some category", zero_shot_scam_confidence=0.59)
+        finding = self.rule.evaluate(inp)
+        assert finding.triggered is False
+
+    def test_triggers_at_exact_threshold(self) -> None:
+        inp = RuleInput(zero_shot_scam_category="some category", zero_shot_scam_confidence=0.60)
+        finding = self.rule.evaluate(inp)
+        assert finding.triggered is True
+
+    def test_non_triggered_weight_still_set(self) -> None:
+        finding = self.rule.evaluate(_clean())
+        assert finding.weight == pytest.approx(0.55)
+
+    # ── Weight configurability ────────────────────────────────────────────
+
+    def test_custom_weight_reflected_in_finding(self) -> None:
+        rule = ZeroShotSemanticScamRule(config=_cfg(zero_shot_semantic_scam_signal=0.20))
+        finding = rule.evaluate(
+            RuleInput(zero_shot_scam_category="some category", zero_shot_scam_confidence=0.80)
+        )
+        assert finding.weight == pytest.approx(0.20)
+        assert finding.triggered is True
 
     # ── Return type ───────────────────────────────────────────────────────
 

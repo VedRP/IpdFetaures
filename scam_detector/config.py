@@ -69,6 +69,8 @@ class RuleWeights(BaseModel):
     hard_disqualifying_signals: float = Field(default=0.95, ge=0.0, le=1.0)
     guaranteed_outcome_claim: float = Field(default=0.85, ge=0.0, le=1.0)
     external_form_handoff: float = Field(default=0.60, ge=0.0, le=1.0)
+    training_program_disguised_as_internship: float = Field(default=0.65, ge=0.0, le=1.0)
+    zero_shot_semantic_scam_signal: float = Field(default=0.55, ge=0.0, le=1.0)
     upfront_fee_and_pay_to_work: float = Field(default=0.90, ge=0.0, le=1.0)
     cross_company_duplicate: float = Field(default=0.80, ge=0.0, le=1.0)
     typosquat_domain: float = Field(default=0.70, ge=0.0, le=1.0)
@@ -255,6 +257,40 @@ class FeedbackConfig(BaseModel):
     )
 
 
+class ZeroShotConfig(BaseModel):
+    """
+    Configuration for the optional zero-shot semantic scam classifier.
+
+    Validated against real data: with concrete, specific candidate labels
+    (not an abstract "scam vs legitimate" framing, which performed no
+    better than chance), a compact pretrained NLI model correctly
+    classified confirmed real scam examples AND paraphrased variants
+    deliberately worded to avoid matching any existing regex pattern —
+    genuine generalization beyond hand-written detectors, not just
+    agreement with what regex already catches.
+
+    Off by default: each call costs ~0.5-0.8s of CPU inference, which is
+    too slow to apply unconditionally across a large batch scoring run.
+    Enable explicitly when that cost is acceptable (e.g. scoring a single
+    record via the API, not a 2000-record batch import).
+    """
+
+    enabled: bool = Field(
+        default=False,
+        description="Off by default due to CPU inference latency (~0.5-0.8s/record)",
+    )
+    model_name: str = Field(
+        default="MoritzLaurer/deberta-v3-xsmall-zeroshot-v1.1-all-33",
+        description="Compact (~146MB) NLI model tuned for zero-shot classification",
+    )
+    confidence_threshold: float = Field(
+        default=0.60,
+        ge=0.0,
+        le=1.0,
+        description="Minimum top-label confidence to treat as a triggered signal",
+    )
+
+
 class AnomalyConfig(BaseModel):
     """Configuration for unsupervised anomaly model and explanations."""
 
@@ -282,6 +318,7 @@ class Config(BaseModel):
     reputation: ReputationConfig = Field(default_factory=ReputationConfig)
     feedback: FeedbackConfig = Field(default_factory=FeedbackConfig)
     anomaly: AnomalyConfig = Field(default_factory=AnomalyConfig)
+    zero_shot: ZeroShotConfig = Field(default_factory=ZeroShotConfig)
     flags: FeatureFlags = Field(default_factory=FeatureFlags)
 
     # When Prompt 6 rule 1 (hard_disqualifying_signals) fires, force this

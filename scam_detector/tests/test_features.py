@@ -25,6 +25,7 @@ obvious positives score detectably higher than obvious negatives.
 from __future__ import annotations
 
 import math
+from unittest.mock import patch
 
 import pytest
 
@@ -37,6 +38,8 @@ from scam_detector.features.text_features import (
     sensitive_info_request_detector,
     guaranteed_outcome_claim_detector,
     external_form_and_phone_handoff_detector,
+    training_program_disguised_as_internship_detector,
+    zero_shot_scam_signal,
     urgency_score,
     boilerplate_similarity,
 )
@@ -613,6 +616,142 @@ class TestExternalFormAndPhoneHandoffDetector:
         result = external_form_and_phone_handoff_detector("hello")
         assert isinstance(result, tuple)
         assert all(isinstance(v, bool) for v in result)
+
+
+# ===========================================================================
+# 6d — training_program_disguised_as_internship_detector
+# ===========================================================================
+
+class TestTrainingProgramDisguisedAsInternshipDetector:
+
+    def test_empty_text_returns_false(self) -> None:
+        assert training_program_disguised_as_internship_detector("") is False
+
+    def test_real_ev_design_example_detected(self) -> None:
+        # Verbatim from a real LetsIntern scrape
+        text = (
+            "The Electric Vehicle Design Internship is a career-focused, "
+            "hands-on training program designed for students and freshers "
+            "who want to build a strong future in the EV and automotive industry."
+        )
+        assert training_program_disguised_as_internship_detector(text) is True
+
+    def test_real_sponsored_admission_example_detected(self) -> None:
+        # Verbatim from a real scrape (company field: "BBA")
+        text = (
+            "We are looking for motivated individuals to join our team in a "
+            "unique Work-Study program. Selected candidates will be provided "
+            "with 100% sponsored admission to a professional degree or "
+            "certification program (BBA, MBA, BCA, or MCA) from our partner university."
+        )
+        assert training_program_disguised_as_internship_detector(text) is True
+
+    def test_training_and_internship_simultaneously_detected(self) -> None:
+        assert training_program_disguised_as_internship_detector(
+            "Training and internships will go simultaneously."
+        ) is True
+
+    def test_self_paced_program_detected(self) -> None:
+        assert training_program_disguised_as_internship_detector(
+            "It is a self-paced program with weekly milestones."
+        ) is True
+
+    def test_bare_training_mention_as_job_duty_not_flagged(self) -> None:
+        # Real-data false-positive case verified against the corpus: a role
+        # that coordinates/sells training programs as a normal job duty
+        # must NOT be flagged - this is common and legitimate.
+        text = (
+            "Coordinate and manage end-to-end execution of virtual training "
+            "programs, including scheduling and communications with instructors."
+        )
+        assert training_program_disguised_as_internship_detector(text) is False
+
+    def test_training_programs_as_sales_target_not_flagged(self) -> None:
+        text = "Qualify leads by assessing client needs for training programs, workshops, or coaching sessions."
+        assert training_program_disguised_as_internship_detector(text) is False
+
+    def test_clean_internship_not_flagged(self) -> None:
+        assert training_program_disguised_as_internship_detector(ANAKIN_SUMMARY) is False
+
+    def test_return_type_is_bool(self) -> None:
+        assert isinstance(training_program_disguised_as_internship_detector("hello"), bool)
+
+    def test_case_insensitive(self) -> None:
+        assert training_program_disguised_as_internship_detector(
+            "THIS IS A CAREER-FOCUSED, HANDS-ON TRAINING PROGRAM"
+        ) is True
+
+
+# ===========================================================================
+# 6e — zero_shot_scam_signal
+# ===========================================================================
+#
+# NOTE: the real model (MoritzLaurer/deberta-v3-xsmall-zeroshot-v1.1-all-33)
+# was manually validated against 3 real scam examples + 3 paraphrased
+# variants + 2 clean examples during development — see ZeroShotConfig's
+# docstring in config.py for the results. Tests here mock the classifier
+# rather than loading the real ~146MB model (~50s cold start), to keep the
+# suite fast; they verify the wiring/gating logic, not model accuracy.
+
+class TestZeroShotScamSignal:
+
+    def test_disabled_by_default_returns_none(self) -> None:
+        # cfg.zero_shot.enabled defaults to False — must short-circuit
+        # without even attempting to load the classifier.
+        category, confidence = zero_shot_scam_signal("some internship text")
+        assert category is None
+        assert confidence == 0.0
+
+    def test_empty_text_returns_none_even_when_enabled(self) -> None:
+        with patch("scam_detector.features.text_features._cfg") as mock_cfg:
+            mock_cfg.zero_shot.enabled = True
+            category, confidence = zero_shot_scam_signal("")
+            assert category is None
+            assert confidence == 0.0
+
+    def test_classifier_unavailable_returns_none(self) -> None:
+        with patch("scam_detector.features.text_features._cfg") as mock_cfg, \
+             patch("scam_detector.features.text_features._zero_shot_classifier", return_value=None):
+            mock_cfg.zero_shot.enabled = True
+            category, confidence = zero_shot_scam_signal("some internship text")
+            assert category is None
+            assert confidence == 0.0
+
+    def test_normal_label_top_prediction_returns_none(self) -> None:
+        mock_classifier = lambda text, labels: {
+            "labels": ["a normal, specific job description with real responsibilities",
+                       "sells a paid training or certification course disguised as a job"],
+            "scores": [0.9, 0.1],
+        }
+        with patch("scam_detector.features.text_features._cfg") as mock_cfg, \
+             patch("scam_detector.features.text_features._zero_shot_classifier", return_value=mock_classifier):
+            mock_cfg.zero_shot.enabled = True
+            category, confidence = zero_shot_scam_signal("a normal internship")
+            assert category is None
+            assert confidence == 0.0
+
+    def test_non_normal_top_prediction_returns_category_and_score(self) -> None:
+        mock_classifier = lambda text, labels: {
+            "labels": ["sells a paid training or certification course disguised as a job",
+                       "a normal, specific job description with real responsibilities"],
+            "scores": [0.93, 0.07],
+        }
+        with patch("scam_detector.features.text_features._cfg") as mock_cfg, \
+             patch("scam_detector.features.text_features._zero_shot_classifier", return_value=mock_classifier):
+            mock_cfg.zero_shot.enabled = True
+            category, confidence = zero_shot_scam_signal("some scammy text")
+            assert category == "sells a paid training or certification course disguised as a job"
+            assert confidence == pytest.approx(0.93)
+
+    def test_classifier_exception_returns_none(self) -> None:
+        def raising_classifier(text, labels):
+            raise RuntimeError("inference failed")
+        with patch("scam_detector.features.text_features._cfg") as mock_cfg, \
+             patch("scam_detector.features.text_features._zero_shot_classifier", return_value=raising_classifier):
+            mock_cfg.zero_shot.enabled = True
+            category, confidence = zero_shot_scam_signal("some text")
+            assert category is None
+            assert confidence == 0.0
 
 
 # ===========================================================================

@@ -54,6 +54,29 @@ def _sbert_model():
 
 
 # ---------------------------------------------------------------------------
+# Lazy zero-shot NLI classifier (optional, opt-in via cfg.zero_shot.enabled)
+# ---------------------------------------------------------------------------
+
+
+def _get_zero_shot_classifier():
+    """Return a cached zero-shot-classification pipeline, or None if unavailable."""
+    try:
+        from transformers import pipeline  # type: ignore
+        return pipeline(
+            "zero-shot-classification",
+            model=_cfg.zero_shot.model_name,
+            device=-1,
+        )
+    except Exception:
+        return None
+
+
+@lru_cache(maxsize=1)
+def _zero_shot_classifier():
+    return _get_zero_shot_classifier()
+
+
+# ---------------------------------------------------------------------------
 # Pydantic output model
 # ---------------------------------------------------------------------------
 
@@ -107,6 +130,13 @@ class TextFeatureVector(BaseModel):
     # 6c. Off-platform form/phone handoff (near-hard disqualifying signal)
     external_form_detected: bool = Field(default=False)
     personal_contact_handoff_detected: bool = Field(default=False)
+
+    # 6d. Internship framed as a packaged training/certification product
+    training_program_disguised_as_internship: bool = Field(default=False)
+
+    # 6e. Optional pretrained zero-shot semantic scam signal (opt-in)
+    zero_shot_scam_category: str | None = Field(default=None)
+    zero_shot_scam_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
     # 7. Boilerplate / near-duplicate similarity
     boilerplate_similarity: float = Field(default=0.0, ge=0.0, le=1.0)
@@ -619,6 +649,142 @@ def external_form_and_phone_handoff_detector(text: str) -> tuple[bool, bool]:
 
 
 # ---------------------------------------------------------------------------
+# 6d. training_program_disguised_as_internship_detector
+# ---------------------------------------------------------------------------
+#
+# Real-data basis (two examples found on LetsIntern):
+#   1. company="Electric Vehicle Design Internship" (identical to its own
+#      title), summary: "...is a career-focused, hands-on training program
+#      designed for students and freshers..." — an incoherent skill list
+#      (AWS/DevOps/WordPress for an "EV Design" role) confirms this is
+#      templated course-marketing content, not a real posting.
+#   2. company="BBA" (a degree name, not an organisation), summary:
+#      "...a unique Work-Study program. Selected candidates will be provided
+#      with 100% sponsored admission to a professional degree or
+#      certification program (BBA, MBA, BCA, or MCA) from our partner
+#      university..." — recruiting students into a paid degree/certification
+#      admission, framed as an internship.
+#
+# IMPORTANT — precision note: the bare word "training" or even "training
+# program" is NOT a usable signal alone. Checked against the real corpus:
+# of 6 postings mentioning "training program", 4 are ordinary legitimate
+# internships where training programs are something the intern coordinates,
+# sells, or attends as a normal job duty (e.g. "coordinate training
+# programs" at a training company, "leads for training programs" in a sales
+# role). Only postings where the phrasing frames the INTERNSHIP ITSELF as a
+# packaged training/admission product are the real signal — hence the
+# specific, narrow phrases below rather than a generic "training" keyword.
+
+_TRAINING_DISGUISED_AS_INTERNSHIP_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"\bcareer.?focused,?\s+hands.?on\s+training\s+program\b", re.I),
+    re.compile(r"\btraining\s+and\s+internships?\s+will\s+go\s+simultaneously\b", re.I),
+    re.compile(r"\b100\s*%\s*sponsored\s+admission\b", re.I),
+    re.compile(r"\bsponsored\s+admission\s+to\s+a\b.{0,40}\b(certification|degree)\s+program\b", re.I | re.S),
+    re.compile(r"\bself.?paced\s+program\b", re.I),
+    re.compile(r"\bthis\s+internship\s+is\s+a\b.{0,30}\btraining\s+program\b", re.I | re.S),
+]
+
+
+def training_program_disguised_as_internship_detector(text: str) -> bool:
+    """
+    Detect a listing that frames the internship itself as a packaged
+    training or paid-admission product, rather than actual work — a
+    recruitment funnel for phone-sold training/certification fees rather
+    than a real job.
+
+    Deliberately narrow: does NOT match generic mentions of "training" or
+    even "training program" as a job duty (e.g. "coordinate training
+    programs"), since that pattern is common in ordinary, legitimate
+    internships and was verified to produce mostly false positives on real
+    data. Only matches phrasing that frames the WHOLE INTERNSHIP as a
+    training/certification/admission product.
+
+    Parameters
+    ----------
+    text:
+        Combined posting text (title + summary + responsibilities + perks +
+        tags).
+
+    Returns
+    -------
+    bool
+        ``True`` → the posting is framed as a training/certification
+        product rather than a real job.
+    """
+    if not text or not text.strip():
+        return False
+    return any(pattern.search(text) for pattern in _TRAINING_DISGUISED_AS_INTERNSHIP_PATTERNS)
+
+
+# ---------------------------------------------------------------------------
+# 6e. zero_shot_scam_signal (optional — pretrained model, not hand-written regex)
+# ---------------------------------------------------------------------------
+#
+# Validation note: tested with an abstract "legitimate vs fraudulent"
+# label pair first — this performed at chance level, misclassifying all 3
+# known real scam examples as "legitimate" with high confidence. Switching
+# to concrete, specific candidate labels (naming the actual red-flag
+# behavior, not asking the model to make a fraud judgment call) fixed this
+# completely: correctly classified all 3 known scams AND 3 paraphrased
+# variants deliberately worded to avoid matching any regex pattern in this
+# module, while correctly leaving 2 known-clean examples classified as
+# normal. This is genuine generalization beyond hand-written detectors —
+# not just agreement with what regex already catches.
+
+_ZERO_SHOT_LABELS: list[str] = [
+    "asks the applicant to pay money or fill an external form to apply",
+    "promises a guaranteed job or admission outcome without proper screening",
+    "sells a paid training or certification course disguised as a job",
+    "a normal, specific job description with real responsibilities",
+]
+_ZERO_SHOT_NORMAL_LABEL = _ZERO_SHOT_LABELS[-1]
+_ZERO_SHOT_MAX_INPUT_CHARS = 2000  # cap for inference speed
+
+
+def zero_shot_scam_signal(text: str) -> tuple[str | None, float]:
+    """
+    Semantic (non-regex) scam-pattern classification via a pretrained
+    zero-shot NLI model — opt-in via ``cfg.zero_shot.enabled`` (off by
+    default; see ``ZeroShotConfig`` docstring for the latency tradeoff and
+    validation results).
+
+    Parameters
+    ----------
+    text:
+        Combined posting text (title + summary + responsibilities + perks +
+        tags).
+
+    Returns
+    -------
+    (category, confidence)
+        ``category`` is one of the three non-normal labels in
+        ``_ZERO_SHOT_LABELS``, or ``None`` if the classifier is
+        disabled/unavailable, the input is empty, or the top prediction is
+        the "normal job description" label. ``confidence`` is 0.0 when
+        ``category`` is None.
+    """
+    if not _cfg.zero_shot.enabled:
+        return None, 0.0
+    if not text or not text.strip():
+        return None, 0.0
+
+    classifier = _zero_shot_classifier()
+    if classifier is None:
+        return None, 0.0
+
+    try:
+        result = classifier(text.strip()[:_ZERO_SHOT_MAX_INPUT_CHARS], _ZERO_SHOT_LABELS)
+        top_label = result["labels"][0]
+        top_score = float(result["scores"][0])
+    except Exception:
+        return None, 0.0
+
+    if top_label == _ZERO_SHOT_NORMAL_LABEL:
+        return None, 0.0
+    return top_label, round(top_score, 4)
+
+
+# ---------------------------------------------------------------------------
 # 7. boilerplate_similarity
 # ---------------------------------------------------------------------------
 
@@ -827,6 +993,12 @@ def extract_text_features(
     # 6c. Off-platform external form / personal phone handoff
     external_form_detected, personal_contact_detected = external_form_and_phone_handoff_detector(pattern_scan_text)
 
+    # 6d. Internship framed as a packaged training/certification product
+    training_disguise = training_program_disguised_as_internship_detector(pattern_scan_text)
+
+    # 6e. Optional pretrained zero-shot semantic scam signal (opt-in, off by default)
+    zero_shot_category, zero_shot_confidence = zero_shot_scam_signal(pattern_scan_text)
+
     # 7. Scam corpus similarity
     scam_sim = scam_corpus_similarity(full_text, scam_embeddings)
 
@@ -847,6 +1019,9 @@ def extract_text_features(
         guaranteed_outcome_claim=guarantee_claim,
         external_form_detected=external_form_detected,
         personal_contact_handoff_detected=personal_contact_detected,
+        training_program_disguised_as_internship=training_disguise,
+        zero_shot_scam_category=zero_shot_category,
+        zero_shot_scam_confidence=zero_shot_confidence,
         boilerplate_similarity=0.0,   # injected by duplicate-detection stage
         scam_corpus_similarity=scam_sim,
         summary_truncated=summary_truncated,

@@ -194,7 +194,8 @@ def flag_mislabeled_company(record: dict[str, Any]) -> tuple[dict[str, Any], Fla
     ``company_suspect``  : True
     ``company_source``   : "category_leak"
     ``company_match_via``: which check matched (``"hardcoded_list"``,
-                           ``"skills_field"``, or ``"tags_field"``)
+                           ``"skills_field"``, ``"tags_field"``, or
+                           ``"title_match"``)
     """
     flags: Flags = {}
     company_raw: str = record.get("company") or ""
@@ -224,6 +225,24 @@ def flag_mislabeled_company(record: dict[str, Any]) -> tuple[dict[str, Any], Fla
         flags["company_suspect"] = True
         flags["company_source"] = "category_leak"
         flags["company_match_via"] = "tags_field"
+        return record, flags
+
+    # Check 4 — company field is identical to the internship's own title
+    # (optionally with a trailing 4-digit year, e.g. "... Internship 2026").
+    # Real-data example: company="Electric Vehicle Design Internship",
+    # name="Electric Vehicle Design Internship 2026" — no real employer name
+    # exists at all, the "company" is just the generic role/course name.
+    # Exact-match only (after year-stripping) to avoid the false-positive
+    # risk of a broader substring check (many real company names ARE a
+    # legitimate substring of their own internship's title, e.g. "TCS" in
+    # "TCS Digital Internship").
+    title_raw: str = record.get("name") or record.get("title") or ""
+    title_lc = title_raw.strip().lower()
+    title_no_year = re.sub(r"\s+\d{4}\s*$", "", title_lc).strip()
+    if title_lc and company_lc in (title_lc, title_no_year):
+        flags["company_suspect"] = True
+        flags["company_source"] = "category_leak"
+        flags["company_match_via"] = "title_match"
         return record, flags
 
     return record, flags

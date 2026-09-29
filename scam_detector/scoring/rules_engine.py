@@ -62,6 +62,9 @@ class RuleInput:
     guaranteed_outcome_claim: bool = False
     external_form_detected: bool = False
     personal_contact_handoff_detected: bool = False
+    training_program_disguised_as_internship: bool = False
+    zero_shot_scam_category: str | None = None
+    zero_shot_scam_confidence: float = 0.0
     urgency_score: float = 0.0
     genericity_score: float = 0.0
     caps_ratio: float = 0.0
@@ -336,6 +339,108 @@ class ExternalFormHandoffRule:
             weight=base_w,
             triggered=False,
             explanation="No external form link or personal phone handoff detected.",
+        )
+
+
+class TrainingProgramDisguisedAsInternshipRule:
+    """
+    Rule 1d: posting frames the internship itself as a packaged training or
+    paid-admission product rather than real work.
+
+    Real-data basis: a LetsIntern posting for "Electric Vehicle Design
+    Internship" (company field identical to its own title — no real
+    employer exists) describes itself as "a career-focused, hands-on
+    training program", with an incoherent skill list (AWS/DevOps/WordPress
+    for an EV design role) confirming templated course-marketing content.
+    A second example ("BBA" as company) offers "100% sponsored admission to
+    a professional degree or certification program" framed as an
+    internship — recruiting students into paid degree/certification
+    admissions.
+
+    Weight: 0.65 — moderate, not a hard reject. Legitimate accelerator- or
+    bootcamp-style internship programs that genuinely combine structured
+    training with real work exist too; this surfaces the pattern for human
+    review rather than presuming fraud outright.
+    """
+
+    rule_id = "training_program_disguised_as_internship"
+
+    def __init__(self, config: Config | None = None) -> None:
+        self._cfg = config or _default_cfg
+
+    def evaluate(self, inp: RuleInput) -> RuleFinding:
+        w = self._cfg.rule_weights.training_program_disguised_as_internship
+        if inp.training_program_disguised_as_internship:
+            return RuleFinding(
+                rule_id=self.rule_id,
+                description="Internship framed as a training/certification product",
+                weight=w,
+                triggered=True,
+                explanation=(
+                    "Posting frames the internship itself as a packaged training "
+                    "program or paid degree/certification admission rather than "
+                    "real work — a common funnel for phone-sold training fees "
+                    "disguised as an internship opportunity."
+                ),
+            )
+        return RuleFinding(
+            rule_id=self.rule_id,
+            description="Internship framed as a training/certification product",
+            weight=w,
+            triggered=False,
+            explanation="No training/certification-product framing detected.",
+        )
+
+
+class ZeroShotSemanticScamRule:
+    """
+    Rule 1e: pretrained zero-shot NLI classifier flags the posting as
+    matching a known scam-behavior category, above a confidence threshold.
+
+    Unlike every other text rule in this engine, this signal is NOT a
+    hand-written regex pattern — it's a pretrained model's semantic
+    judgment, validated to generalize to scam text phrased differently from
+    anything the regex-based rules would match (see
+    ``zero_shot_scam_signal`` docstring for the validation methodology).
+
+    Off by default (``cfg.zero_shot.enabled``) due to CPU inference latency
+    (~0.5-0.8s/record) — unsuitable as a default for large batch scoring
+    runs. When disabled, ``inp.zero_shot_scam_category`` is always None and
+    this rule never triggers.
+
+    Weight: 0.55 (default) — deliberately lower than the regex-based rules
+    in this tier, since a probabilistic model judgment is inherently less
+    certain than an exact pattern match on verified real examples.
+    """
+
+    rule_id = "zero_shot_semantic_scam_signal"
+
+    def __init__(self, config: Config | None = None) -> None:
+        self._cfg = config or _default_cfg
+
+    def evaluate(self, inp: RuleInput) -> RuleFinding:
+        w = self._cfg.rule_weights.zero_shot_semantic_scam_signal
+        threshold = self._cfg.zero_shot.confidence_threshold
+        if inp.zero_shot_scam_category and inp.zero_shot_scam_confidence >= threshold:
+            return RuleFinding(
+                rule_id=self.rule_id,
+                description="Pretrained model flagged a semantic scam-behavior pattern",
+                weight=w,
+                triggered=True,
+                explanation=(
+                    f"Zero-shot semantic classifier matched this posting to "
+                    f"'{inp.zero_shot_scam_category}' with "
+                    f"{inp.zero_shot_scam_confidence:.0%} confidence — a pretrained-model "
+                    f"signal, not a hand-written pattern match, useful for catching "
+                    f"scam phrasing that regex-based rules would miss."
+                ),
+            )
+        return RuleFinding(
+            rule_id=self.rule_id,
+            description="Pretrained model flagged a semantic scam-behavior pattern",
+            weight=w,
+            triggered=False,
+            explanation="No semantic scam-behavior pattern detected (or classifier disabled).",
         )
 
 
@@ -923,6 +1028,8 @@ def _default_rules(config: Config | None = None) -> list[Rule]:
         HardDisqualifyingSignalsRule(cfg),
         GuaranteedOutcomeClaimRule(cfg),
         ExternalFormHandoffRule(cfg),
+        TrainingProgramDisguisedAsInternshipRule(cfg),
+        ZeroShotSemanticScamRule(cfg),
         UpfrontFeeAndPayToWorkRule(cfg),
         StipendPerkContradictionRule(cfg),
         CrossCompanyDuplicateRule(cfg),
