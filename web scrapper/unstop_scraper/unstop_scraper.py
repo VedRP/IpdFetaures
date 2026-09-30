@@ -284,18 +284,21 @@ def parse_api_item(item: dict) -> Optional[dict]:
                 posted = f"{months[mo]} {d}, {y}"
 
         # ── Description (strip HTML) ───────────────────────────────────────
+        # NOTE: previously kept only the FIRST sentence over 30 chars,
+        # truncated to 300 chars, discarding the rest of item["details"]
+        # entirely — even though the full text is already available from
+        # Unstop's own API response, no extra request needed. This starved
+        # scam_detector's text-based signals (sensitive-info / guaranteed-
+        # outcome / genericity / duplicate-detection) of real content.
+        # Keep the full stripped text; format_internship.py's
+        # _generate_summary() already applies an appropriate final cap.
         description = "N/A"
         details_html = item.get("details", "") or ""
         details_text = re.sub(r"<[^>]+>", " ", details_html)
         details_text = re.sub(r"&[a-z]+;", " ", details_text)
         details_text = re.sub(r"\s+", " ", details_text).strip()
         if details_text:
-            sentences = re.split(r"(?<=[.!?])\s+", details_text)
-            for s in sentences:
-                s = s.strip()
-                if len(s) > 30:
-                    description = s[:300]
-                    break
+            description = details_text
 
         # ── Responsibilities from description ─────────────────────────────
         responsibilities = []

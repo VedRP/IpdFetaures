@@ -261,23 +261,34 @@ class ZeroShotConfig(BaseModel):
     """
     Configuration for the optional zero-shot semantic scam classifier.
 
-    Validated against real data: with concrete, specific candidate labels
-    (not an abstract "scam vs legitimate" framing, which performed no
-    better than chance), a compact pretrained NLI model correctly
-    classified confirmed real scam examples AND paraphrased variants
-    deliberately worded to avoid matching any existing regex pattern —
-    genuine generalization beyond hand-written detectors, not just
-    agreement with what regex already catches.
+    ⚠️  KNOWN UNRELIABLE — DO NOT ENABLE WITHOUT RE-VALIDATION. ⚠️
+    Initial validation against 8 hand-picked examples (3 known real scams +
+    3 paraphrases + 2 clean) looked strong and correctly generalized past
+    regex phrasing. But a follow-up test against a RANDOM 250-record sample
+    of real data told a different story: 49/250 (19.6%) flagged — far above
+    the true scam rate in this corpus. Almost every false positive lands on
+    the SAME label, "sells a paid training or certification course
+    disguised as a job" — including completely ordinary postings from real
+    companies like Airbus and established local firms. The model cannot
+    distinguish "this internship teaches you skills" (true of nearly every
+    legitimate internship) from "this internship IS a fake training
+    product" (the actual red flag) — the label is too close to what
+    defines an internship in general, not a deviation from it.
 
-    Off by default: each call costs ~0.5-0.8s of CPU inference, which is
-    too slow to apply unconditionally across a large batch scoring run.
-    Enable explicitly when that cost is acceptable (e.g. scoring a single
-    record via the API, not a 2000-record batch import).
+    Lesson: 8 examples is not enough to validate a probabilistic signal.
+    Before ever enabling this, either drop/rework the training-course label
+    or find a materially higher confidence threshold, and re-validate
+    against a large random sample — not hand-picked cases — same as any
+    other rule in this engine.
+
+    Off by default: both for the false-positive rate above AND because
+    each call costs ~0.5-0.8s of CPU inference, too slow for a large batch
+    scoring run.
     """
 
     enabled: bool = Field(
         default=False,
-        description="Off by default due to CPU inference latency (~0.5-0.8s/record)",
+        description="Off by default: ~20% false-positive rate on real data (see class docstring) AND ~0.5-0.8s/record CPU latency",
     )
     model_name: str = Field(
         default="MoritzLaurer/deberta-v3-xsmall-zeroshot-v1.1-all-33",

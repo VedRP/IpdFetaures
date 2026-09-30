@@ -450,17 +450,28 @@ def parse_detail_page(driver: webdriver.Chrome, url: str) -> Optional[dict]:
                     apply_by = val
 
         # ── DESCRIPTION ───────────────────────────────────────────────────────
+        # NOTE: previously kept only the FIRST qualifying line and stopped,
+        # even though `text` already holds the full detail-page content
+        # (used elsewhere in this function for stipend/duration/
+        # responsibilities regex). Keep collecting qualifying lines (same
+        # noise filter, so WordPress nav/social-media junk is still
+        # excluded) up to a reasonable length instead of discarding
+        # everything after the first line.
         description = "N/A"
         skip_d = {"skip to content", "follow us", "click here", "play now",
                   "facebook", "twitter", "linkedin", "instagram", "youtube",
                   "whatsapp", "registration form", "first", "last"}
+        description_parts: list[str] = []
         for line in lines:
             if (len(line) > 50
                     and line.lower() != title.lower()
                     and not any(s in line.lower() for s in skip_d)
                     and not re.search(r"^\d+(\.\d+)?$", line)):
-                description = line
-                break
+                description_parts.append(line)
+                if sum(len(p) for p in description_parts) > 1200:
+                    break
+        if description_parts:
+            description = " ".join(description_parts)
 
         # ── RESPONSIBILITIES ───────────────────────────────────────────────────
         responsibilities = []

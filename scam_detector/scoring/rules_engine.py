@@ -397,16 +397,18 @@ class ZeroShotSemanticScamRule:
     Rule 1e: pretrained zero-shot NLI classifier flags the posting as
     matching a known scam-behavior category, above a confidence threshold.
 
+    ⚠️  Off by default and NOT currently recommended for use. A small
+    hand-picked validation looked promising, but a follow-up test against a
+    random 250-record real sample found a ~20% false-positive rate,
+    dominated by one label ("sells a paid training or certification course
+    disguised as a job") over-triggering on completely ordinary postings
+    from real companies. See ``ZeroShotConfig`` in config.py for the full
+    finding before ever setting ``cfg.zero_shot.enabled = True``.
+
     Unlike every other text rule in this engine, this signal is NOT a
     hand-written regex pattern — it's a pretrained model's semantic
-    judgment, validated to generalize to scam text phrased differently from
-    anything the regex-based rules would match (see
-    ``zero_shot_scam_signal`` docstring for the validation methodology).
-
-    Off by default (``cfg.zero_shot.enabled``) due to CPU inference latency
-    (~0.5-0.8s/record) — unsuitable as a default for large batch scoring
-    runs. When disabled, ``inp.zero_shot_scam_category`` is always None and
-    this rule never triggers.
+    judgment. When disabled, ``inp.zero_shot_scam_category`` is always None
+    and this rule never triggers (i.e. it is a safe no-op today).
 
     Weight: 0.55 (default) — deliberately lower than the regex-based rules
     in this tier, since a probabilistic model judgment is inherently less

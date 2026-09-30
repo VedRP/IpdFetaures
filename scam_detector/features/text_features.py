@@ -491,7 +491,14 @@ _SENSITIVE_PATTERNS: list[re.Pattern[str]] = [
     # charge wording is still covered by the explicit patterns below.
     re.compile(r"\bpay\b.{0,20}\b(fee|amount|deposit)\b", re.I | re.S),
     re.compile(r"\b(registration|processing)\s+charges?\b", re.I),
-    re.compile(r"\bbank\s+(account|details|number|transfer)\b",  re.I),
+    # NOTE: bare "bank\s+account" (without a following qualifier like
+    # "details"/"number") was removed after a real-corpus false positive:
+    # "you won't just boost your bank account" — a common colloquial phrase
+    # meaning "earn money", not a request for banking information. This is
+    # the hard-disqualifying rule (weight 0.95), so a loose match here is
+    # more costly than anywhere else in the engine.
+    re.compile(r"\bbank\s+account\s+(details|number)\b", re.I),
+    re.compile(r"\bbank\s+(details|number|transfer)\b",  re.I),
     re.compile(r"\bupi\s+(id|payment|transfer)\b",               re.I),
     re.compile(r"\baadh?a?ar\b",                                  re.I),
     re.compile(r"\bpan\s*(card|number|no\.?)\b",                 re.I),
@@ -621,10 +628,20 @@ _EXTERNAL_FORM_PATTERNS: list[re.Pattern[str]] = [
 # Indian mobile number (10 digits, starts 6-9, optional +91/91 prefix),
 # required to appear near a contact-invitation verb to avoid matching an
 # unrelated 10-digit number elsewhere in the text.
+#
+# NOTE: "contact" was deliberately removed from the trigger-verb list after
+# a real-corpus false positive: a legitimate construction-firm job posting
+# ("Dharvesh Builders") listed a standard "📞 Contact: 9048500028" business
+# line — completely normal, and the posting even said "Apply directly
+# through Internshala" (i.e. not funneling away from the platform at all).
+# "contact" is too generic a word for legitimate business communications
+# ("Contact us at...", "For queries, contact HR..."); the remaining verbs
+# ("call", "whatsapp", "dm", "message", "ping") carry a more specific,
+# casual personal-outreach connotation closer to the actual scam pattern.
 _PERSONAL_CONTACT_PATTERN = re.compile(
-    r"\b(?:call|contact|whatsapp|dm|message|ping)\b.{0,20}"
+    r"\b(?:call|whatsapp|dm|message|ping)\b.{0,20}"
     r"(?:\+?91[\-\s]?)?[6-9]\d{9}\b"
-    r"|\b(?:\+?91[\-\s]?)?[6-9]\d{9}\b.{0,20}\b(?:call|contact|whatsapp|dm|message)\b",
+    r"|\b(?:\+?91[\-\s]?)?[6-9]\d{9}\b.{0,20}\b(?:call|whatsapp|dm|message)\b",
     re.I | re.S,
 )
 
@@ -720,16 +737,25 @@ def training_program_disguised_as_internship_detector(text: str) -> bool:
 # 6e. zero_shot_scam_signal (optional — pretrained model, not hand-written regex)
 # ---------------------------------------------------------------------------
 #
-# Validation note: tested with an abstract "legitimate vs fraudulent"
-# label pair first — this performed at chance level, misclassifying all 3
-# known real scam examples as "legitimate" with high confidence. Switching
-# to concrete, specific candidate labels (naming the actual red-flag
-# behavior, not asking the model to make a fraud judgment call) fixed this
-# completely: correctly classified all 3 known scams AND 3 paraphrased
-# variants deliberately worded to avoid matching any regex pattern in this
-# module, while correctly leaving 2 known-clean examples classified as
-# normal. This is genuine generalization beyond hand-written detectors —
-# not just agreement with what regex already catches.
+# Validation history — READ BEFORE ENABLING (cfg.zero_shot.enabled):
+#   1. Tested an abstract "legitimate vs fraudulent" label pair first — this
+#      performed at chance level, misclassifying all 3 known real scam
+#      examples as "legitimate" with high confidence.
+#   2. Switched to concrete, specific candidate labels (naming the actual
+#      red-flag behavior). On 8 hand-picked examples (3 known scams + 3
+#      paraphrases + 2 clean) this looked like genuine generalization past
+#      regex phrasing — all 8 classified correctly.
+#   3. BUT a follow-up test against a RANDOM 250-record real sample found a
+#      ~20% false-positive rate. Nearly every false positive landed on
+#      "sells a paid training or certification course disguised as a job",
+#      over-triggering on completely ordinary postings (including one from
+#      Airbus) — the model cannot distinguish "this internship teaches you
+#      skills" (true of almost every legitimate internship) from "this
+#      internship IS a fake training product" (the actual red flag).
+# Conclusion: 8 hand-picked examples were not enough to validate a
+# probabilistic signal. This needs a reworked label set and/or a much
+# higher confidence threshold, re-validated on a large random sample,
+# before it should ever be enabled. See ZeroShotConfig in config.py.
 
 _ZERO_SHOT_LABELS: list[str] = [
     "asks the applicant to pay money or fill an external form to apply",

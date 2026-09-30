@@ -464,6 +464,26 @@ class TestSensitiveInfoRequestDetector:
             "Share bank account details for stipend transfer."
         ) is True
 
+    def test_bank_account_number_detected(self) -> None:
+        assert sensitive_info_request_detector(
+            "Please provide your bank account number to process payment."
+        ) is True
+
+    def test_boost_your_bank_account_idiom_not_flagged(self) -> None:
+        # Real-corpus false positive: a real Unstop listing ("Nbyula")
+        # said "you won't just boost your bank account" - a colloquial
+        # phrase meaning "earn money", not a request for banking details.
+        # This was firing the hard-disqualifying rule (weight 0.95).
+        assert sensitive_info_request_detector(
+            "As a Campus Supernova, you won't just boost your bank account; "
+            "you'll shine bright in the world of digital marketing."
+        ) is False
+
+    def test_bank_details_without_account_word_detected(self) -> None:
+        assert sensitive_info_request_detector(
+            "Kindly share your bank details before the interview."
+        ) is True
+
     def test_pay_to_join_detected(self) -> None:
         assert sensitive_info_request_detector(
             "You need to pay ₹2000 to join the programme."
@@ -599,6 +619,19 @@ class TestExternalFormAndPhoneHandoffDetector:
         _, phone = external_form_and_phone_handoff_detector(
             "Reference code: 9876543210 for internal tracking purposes."
         )
+        assert phone is False
+
+    def test_standard_business_contact_line_not_flagged(self) -> None:
+        # Real-corpus false positive: a legitimate construction-firm job
+        # posting listed a standard "Contact: <phone>" business line and
+        # even said "Apply directly through Internshala" - not a scam
+        # funnel at all. "contact" was removed from the trigger-verb list
+        # because it's too generic for normal business communications.
+        form, phone = external_form_and_phone_handoff_detector(
+            "How to Apply: Apply directly through Internshala or send your "
+            "resume to hr@company.com. Contact: 9048500028 / 9048500068"
+        )
+        assert form is False
         assert phone is False
 
     def test_clean_internship_not_flagged(self) -> None:
