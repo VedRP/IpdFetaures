@@ -440,6 +440,7 @@ def feature_vector_to_rule_input(
         summary_truncated=fv.text.summary_truncated,
         company_is_suspect=fv.company.is_suspect,
         typosquat_min_distance=fv.company.typosquat_min_distance,
+        domain_age_days=fv.company.domain_age_days,
         is_platform_internal=fv.url.is_platform_internal,
         is_url_shortener=fv.url.is_url_shortener,
         is_known_ats=fv.url.is_known_ats,

@@ -75,6 +75,7 @@ class RuleInput:
     # ── Company features (Prompt 3) ───────────────────────────────────────
     company_is_suspect: bool = False          # category-leak flag from remediation
     typosquat_min_distance: float = 1.0       # 0 = exact brand match
+    domain_age_days: int | None = None        # None = unknown/not applicable (platform/ATS link)
 
     # ── URL features (Prompt 3) ───────────────────────────────────────────
     is_platform_internal: bool = False
@@ -797,6 +798,72 @@ class TyposquatDomainRule:
         )
 
 
+class YoungDomainAgeRule:
+    """
+    Rule 6b: off-platform employer domain was registered very recently.
+
+    A classic, well-established fraud signal: scam operations typically
+    register a domain shortly before (or even after) starting to post
+    fraudulent listings, while legitimate companies' domains are usually
+    years old. ``inp.domain_age_days`` is only ever populated for a genuine
+    off-platform employer domain — the WHOIS lookup is skipped entirely for
+    platform/ATS links (see ``extract_company_url_features`` in
+    company_features.py), since those are always old and identical across
+    nearly every record on that platform, carrying zero discriminative
+    value. ``None`` means unknown/not-applicable and never triggers.
+
+    Weight: 0.55 (default) — moderate. A young domain alone is not
+    definitive (genuine new startups have young domains too); this is a
+    supporting signal, not a hard reject.
+
+    NOTE: as of this writing, this rule is structurally unreachable on the
+    current real corpus — every record's apply link routes through a
+    platform or known ATS (confirmed empirically across 2,000+ real
+    records), so ``domain_age_days`` is always None. It is correct, tested,
+    and ready for the moment genuine off-platform employer links appear in
+    the data (e.g. broader scraper coverage, or direct employer postings).
+    """
+
+    rule_id = "young_domain_age"
+
+    def __init__(self, config: Config | None = None) -> None:
+        self._cfg = config or _default_cfg
+
+    def evaluate(self, inp: RuleInput) -> RuleFinding:
+        w = self._cfg.rule_weights.young_domain_age
+        threshold_days = self._cfg.rule_thresholds.young_domain_age_days_threshold
+
+        if inp.domain_age_days is None:
+            return RuleFinding(
+                rule_id=self.rule_id,
+                description="Off-platform employer domain registered very recently",
+                weight=w,
+                triggered=False,
+                explanation="Domain age unknown or not applicable (platform/ATS link).",
+            )
+
+        if inp.domain_age_days < threshold_days:
+            return RuleFinding(
+                rule_id=self.rule_id,
+                description="Off-platform employer domain registered very recently",
+                weight=w,
+                triggered=True,
+                explanation=(
+                    f"Off-platform employer domain was registered only "
+                    f"{inp.domain_age_days} days ago (threshold = {threshold_days}) — "
+                    "a classic fraud signal, though not definitive on its own."
+                ),
+            )
+
+        return RuleFinding(
+            rule_id=self.rule_id,
+            description="Off-platform employer domain registered very recently",
+            weight=w,
+            triggered=False,
+            explanation=f"Domain age ({inp.domain_age_days} days) is not suspiciously young.",
+        )
+
+
 class MassOpeningsVagueRoleRule:
     """
     Rule 7: openings_zscore HIGH AND genericity_score HIGH (combined condition)
@@ -1042,6 +1109,7 @@ def _default_rules(config: Config | None = None) -> list[Rule]:
         ExtremeStipendOutlierRule(cfg),
         UnverifiableCompanyRule(cfg),
         TyposquatDomainRule(cfg),
+        YoungDomainAgeRule(cfg),
         MassOpeningsVagueRoleRule(cfg),
     ]
 

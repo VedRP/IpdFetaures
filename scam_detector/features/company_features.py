@@ -527,6 +527,8 @@ def extract_company_url_features(
     components = parse_url_components(apply_link)
     tld = components["tld"]
     registered_dom = components["registered_domain"] or components["domain"]
+    is_internal = is_platform_internal_link(apply_link)
+    is_ats = is_known_ats_domain(apply_link)
 
     # ── Company features ──────────────────────────────────────────────────
     suspect = is_company_suspect(effective_flags)
@@ -537,7 +539,20 @@ def extract_company_url_features(
     else:
         freq = company_posting_frequency(company, batch)
         typo_dist = typosquat_brand_distance(company)
-        domain_age = fetch_domain_age_days(registered_dom) if registered_dom else None
+        # Skip the WHOIS lookup entirely for platform-internal / known-ATS
+        # links: their domain age is always old and identical across nearly
+        # every record on that platform (internshala.com, naukri.com, ...),
+        # so it carries zero discriminative value even if looked up — this
+        # was previously an unconditional network call (SQLite-cached, but
+        # still wasted) on ~every record for a feature that was then never
+        # read by any rule or the anomaly model at all. Only look it up for
+        # the case where it's actually actionable: a genuine off-platform
+        # employer domain.
+        domain_age = (
+            fetch_domain_age_days(registered_dom)
+            if (registered_dom and not is_internal and not is_ats)
+            else None
+        )
         company_feats = CompanyFeatures(
             is_suspect=False,
             has_legal_suffix=has_legal_suffix(company),
@@ -556,9 +571,9 @@ def extract_company_url_features(
         path_depth=components["path_depth"],
         query_param_count=components["query_param_count"],
         is_https=components["is_https"],
-        is_platform_internal=is_platform_internal_link(apply_link),
+        is_platform_internal=is_internal,
         is_url_shortener=is_url_shortener(apply_link),
-        is_known_ats=is_known_ats_domain(apply_link),
+        is_known_ats=is_ats,
         domain_entropy=url_entropy(apply_link),
         domain_company_similarity=domain_company_name_similarity(apply_link, company),
         tld_risk_score=_tld_risk_score(tld),

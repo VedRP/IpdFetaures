@@ -71,6 +71,7 @@ class RuleWeights(BaseModel):
     external_form_handoff: float = Field(default=0.60, ge=0.0, le=1.0)
     training_program_disguised_as_internship: float = Field(default=0.65, ge=0.0, le=1.0)
     zero_shot_semantic_scam_signal: float = Field(default=0.55, ge=0.0, le=1.0)
+    young_domain_age: float = Field(default=0.55, ge=0.0, le=1.0)
     upfront_fee_and_pay_to_work: float = Field(default=0.90, ge=0.0, le=1.0)
     cross_company_duplicate: float = Field(default=0.80, ge=0.0, le=1.0)
     typosquat_domain: float = Field(default=0.70, ge=0.0, le=1.0)
@@ -106,6 +107,12 @@ class RuleThresholds(BaseModel):
     # NgoFundraisingStipendNetworkRule: minimum distinct companies sharing
     # the exact same lump-sum stipend amount to flag a coordinated network
     ngo_stipend_min_distinct_companies: int = Field(default=3, ge=2)
+
+    # YoungDomainAgeRule: domain must be younger than this to trigger.
+    # Only evaluated for genuine off-platform employer domains — platform/
+    # ATS links are gated out before the WHOIS lookup even happens (see
+    # extract_company_url_features in company_features.py).
+    young_domain_age_days_threshold: int = Field(default=90, ge=0)
 
     # Minimum peer group size required to compute stable z-scores
     min_peer_group_size: int = Field(

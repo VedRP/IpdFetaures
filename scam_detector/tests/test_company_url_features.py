@@ -15,6 +15,8 @@ All URL fixtures come directly from internScraper/checkpoint_internships.json
 and web_scrapper/telegram scraper/all_channels_internships.json.
 """
 from __future__ import annotations
+from unittest.mock import patch
+
 import pytest
 
 from scam_detector.features.company_features import (
@@ -770,3 +772,46 @@ class TestNgoStipendNetworkFlag:
         flagged, count = ngo_stipend_network_flag(record, {}, min_distinct_companies=3)
         assert flagged is False
         assert count == 0
+
+
+# ===========================================================================
+# WHOIS domain-age lookup gating (extract_company_url_features)
+# ===========================================================================
+#
+# domain_age_days was previously computed unconditionally for every record
+# (an expensive WHOIS lookup, SQLite-cached but still wasted network I/O)
+# yet never consumed by any rule or the anomaly model. Fixed to skip the
+# lookup entirely for platform-internal / known-ATS links, since those are
+# always old and identical across nearly every record on that platform -
+# zero discriminative value even if looked up. These tests verify the
+# gating itself, independent of whether the WHOIS call succeeds or fails.
+
+class TestDomainAgeLookupGating:
+
+    def test_whois_lookup_skipped_for_platform_internal_link(self) -> None:
+        # ANAKIN_RECORD uses an internshala.com apply link (platform-internal)
+        with patch(
+            "scam_detector.features.company_features.fetch_domain_age_days"
+        ) as mock_fetch:
+            extract_company_url_features(ANAKIN_RECORD)
+            mock_fetch.assert_not_called()
+
+    def test_whois_lookup_attempted_for_genuine_offplatform_domain(self) -> None:
+        # RAZORPAY_RECORD uses a direct employer domain (razorpay.com) -
+        # neither platform-internal nor a known ATS.
+        with patch(
+            "scam_detector.features.company_features.fetch_domain_age_days",
+            return_value=3650,
+        ) as mock_fetch:
+            result = extract_company_url_features(RAZORPAY_RECORD)
+            mock_fetch.assert_called_once()
+            assert result.company.domain_age_days == 3650
+
+    def test_whois_lookup_skipped_for_known_ats(self) -> None:
+        # GEMINI_RECORD uses boards.greenhouse.io (a known ATS, off-platform
+        # but not a company's own domain)
+        with patch(
+            "scam_detector.features.company_features.fetch_domain_age_days"
+        ) as mock_fetch:
+            extract_company_url_features(GEMINI_RECORD)
+            mock_fetch.assert_not_called()

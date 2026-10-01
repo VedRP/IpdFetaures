@@ -44,6 +44,7 @@ from scam_detector.scoring.rules_engine import (
     ExternalFormHandoffRule,
     TrainingProgramDisguisedAsInternshipRule,
     ZeroShotSemanticScamRule,
+    YoungDomainAgeRule,
     NgoFundraisingStipendNetworkRule,
     StipendPerkContradictionRule,
     CrossCompanyDuplicateRule,
@@ -406,6 +407,79 @@ class TestZeroShotSemanticScamRule:
             RuleInput(zero_shot_scam_category="some category", zero_shot_scam_confidence=0.80)
         )
         assert finding.weight == pytest.approx(0.20)
+        assert finding.triggered is True
+
+    # ── Return type ───────────────────────────────────────────────────────
+
+    def test_returns_rule_finding_instance(self) -> None:
+        assert isinstance(self.rule.evaluate(_clean()), RuleFinding)
+
+
+# ===========================================================================
+# TestYoungDomainAgeRule
+# ===========================================================================
+
+class TestYoungDomainAgeRule:
+
+    def setup_method(self) -> None:
+        self.rule = YoungDomainAgeRule()
+
+    # ── Trigger ───────────────────────────────────────────────────────────
+
+    def test_triggers_when_domain_younger_than_threshold(self) -> None:
+        inp = RuleInput(domain_age_days=10)
+        finding = self.rule.evaluate(inp)
+        assert finding.triggered is True
+
+    def test_triggered_rule_id_correct(self) -> None:
+        finding = self.rule.evaluate(RuleInput(domain_age_days=5))
+        assert finding.rule_id == "young_domain_age"
+
+    def test_triggered_weight_matches_config_default(self) -> None:
+        finding = self.rule.evaluate(RuleInput(domain_age_days=5))
+        assert finding.weight == pytest.approx(0.55)
+
+    def test_explanation_includes_days(self) -> None:
+        finding = self.rule.evaluate(RuleInput(domain_age_days=7))
+        assert "7" in finding.explanation
+
+    # ── No-trigger ────────────────────────────────────────────────────────
+
+    def test_does_not_trigger_when_none(self) -> None:
+        # None = unknown/not-applicable (platform/ATS link) — must never trigger
+        finding = self.rule.evaluate(_clean())
+        assert finding.triggered is False
+
+    def test_does_not_trigger_when_old_domain(self) -> None:
+        finding = self.rule.evaluate(RuleInput(domain_age_days=3650))
+        assert finding.triggered is False
+
+    def test_does_not_trigger_at_exact_threshold(self) -> None:
+        # threshold default is 90 — age must be strictly LESS than threshold
+        finding = self.rule.evaluate(RuleInput(domain_age_days=90))
+        assert finding.triggered is False
+
+    def test_non_triggered_weight_still_set(self) -> None:
+        finding = self.rule.evaluate(_clean())
+        assert finding.weight == pytest.approx(0.55)
+
+    def test_none_explanation_mentions_unknown(self) -> None:
+        explanation = self.rule.evaluate(_clean()).explanation.lower()
+        assert "unknown" in explanation or "not applicable" in explanation
+
+    # ── Weight configurability ────────────────────────────────────────────
+
+    def test_custom_weight_reflected_in_finding(self) -> None:
+        rule = YoungDomainAgeRule(config=_cfg(young_domain_age=0.30))
+        finding = rule.evaluate(RuleInput(domain_age_days=5))
+        assert finding.weight == pytest.approx(0.30)
+        assert finding.triggered is True
+
+    # ── Threshold configurability ────────────────────────────────────────────
+
+    def test_custom_threshold_reflected(self) -> None:
+        rule = YoungDomainAgeRule(config=_cfg_thresholds(young_domain_age_days_threshold=365))
+        finding = rule.evaluate(RuleInput(domain_age_days=200))
         assert finding.triggered is True
 
     # ── Return type ───────────────────────────────────────────────────────
