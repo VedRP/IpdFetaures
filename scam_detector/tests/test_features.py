@@ -304,6 +304,27 @@ class TestGenericityScore:
         assert 0.0 <= fundraising <= 1.0
         assert 0.0 <= software_dev <= 1.0
 
+    def test_specific_tech_title_containing_development_scores_low(self) -> None:
+        # Real-corpus false positive: with token_set_ratio (the previous
+        # implementation), any title sharing the word "Development" with a
+        # list entry scored close to 1.0 regardless of specificity -
+        # "SDET Intern (Software Development Engineer in Test)", a specific
+        # role at a real company (Icertis), scored 0.85-1.0 purely from that
+        # shared word, incorrectly triggering MassOpeningsVagueRoleRule.
+        # token_sort_ratio (current implementation) correctly penalizes the
+        # extra qualifying words instead of ignoring them.
+        score = genericity_score("SDET Intern (Software Development Engineer in Test)")
+        assert score < 0.65
+
+    def test_business_development_with_qualifier_scores_below_threshold(self) -> None:
+        score = genericity_score("Business Development Executive - Fintech Vertical")
+        assert score < 0.65
+
+    def test_bare_business_development_still_scores_generic(self) -> None:
+        # The genuinely generic, undifferentiated version must still match -
+        # this is a real, distinct vague-title category in this domain.
+        assert genericity_score("Business Development (Sales)") > 0.9
+
 
 # ===========================================================================
 # 4 — title_summary_alignment (SBERT — may be skipped without model)

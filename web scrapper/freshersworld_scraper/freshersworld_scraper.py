@@ -8,20 +8,34 @@ Strategy:
     e.g. /jobs/data-analyst-internship-jobs-opening-in-nuage-compusys-at-bangalore-2874625
     → title: Data Analyst Internship, company: Nuage Compusys, location: Bangalore, id: 2874625
   - Card text is SECONDARY (enriches with salary, experience, qualifications, posted date)
+  - DETAIL PAGE (fetch_full_job_description): this scraper produces NO
+    description/summary field at all - the downstream pipeline's AI enricher
+    (ai_enricher.py, Cohere) generates a synthetic summary from scratch when
+    one is missing, meaning every FreshersWorld summary was previously
+    entirely AI-hallucinated rather than real scraped text. Detail pages are
+    server-rendered (a plain `requests.get()` works, no Selenium needed,
+    unlike Naukri's client-rendered SPA) with a dedicated `job-desc` div
+    containing the real job description. Extraction is bounded to end
+    before "More information about this ... Job" / "Please go through the
+    below FAQs", which precede a generic FAQ boilerplate block identical
+    across all FreshersWorld postings.
   - Scrapes the main category page + city-specific pages with offset pagination
   - Deduplicates by numeric job ID extracted from URL
 
 Install:
-    pip install selenium webdriver-manager
+    pip install selenium webdriver-manager requests
 """
 
 import re
 import json
 import time
 import logging
+import html as html_module
 from typing import Optional
 import sys
 import os
+
+import requests
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from format_internship import format_and_save
 from collections import Counter
@@ -548,6 +562,57 @@ def build_url(city_slug: str, offset: int) -> str:
 
 
 # ============================================================================
+#  DETAIL PAGE ENRICHMENT
+# ============================================================================
+
+_FW_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+}
+_FW_END_MARKERS = ("More information about this", "Please go through the below FAQs")
+
+
+def fetch_full_job_description(url: str, timeout: int = 15) -> str:
+    """
+    Fetch a FreshersWorld job detail page (server-rendered, plain HTTP is
+    enough) and extract the real job description from its `job-desc` div,
+    bounded to exclude the generic FAQ boilerplate that follows on every
+    listing ("More information about this ... Job" / "Please go through the
+    below FAQs...").
+
+    Returns "" on any failure or if the div isn't found - callers should
+    fall back to AI enrichment (ai_enricher.py) as before.
+    """
+    try:
+        resp = requests.get(url, headers=_FW_HEADERS, timeout=timeout)
+        if resp.status_code != 200:
+            return ""
+        raw_html = resp.text
+    except Exception as e:
+        log.debug("fetch_full_job_description failed for %s: %s", url, e)
+        return ""
+
+    start = raw_html.find('class="job-desc"')
+    if start == -1:
+        return ""
+    start = raw_html.find(">", start) + 1
+    if start == 0:
+        return ""
+
+    end = len(raw_html)
+    for marker in _FW_END_MARKERS:
+        i = raw_html.find(marker, start)
+        if i != -1:
+            end = min(end, i)
+
+    chunk = raw_html[start:end]
+    text = re.sub(r"<[^>]+>", " ", chunk)
+    text = html_module.unescape(text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+# ============================================================================
 #  SCRAPE ONE PAGE
 # ============================================================================
 def scrape_page(driver: webdriver.Chrome, url: str, seen_ids: set) -> list:
@@ -637,6 +702,17 @@ def scrape_page(driver: webdriver.Chrome, url: str, seen_ids: set) -> list:
             log.debug("    Stale element for id %s", job_id)
         except Exception as e:
             log.debug("    Error parsing id %s: %s", job_id, e)
+
+    # ── Detail-page enrichment pass ─────────────────────────────────────────
+    # Plain requests.get() per listing - server-rendered, no Selenium needed.
+    # This scraper previously produced no description field at all, meaning
+    # the downstream AI enricher had to hallucinate a summary from scratch.
+    log.info("  Enriching %d items with real job descriptions…", len(results))
+    for item in results:
+        desc = fetch_full_job_description(item["link"])
+        if desc:
+            item["description"] = desc
+        time.sleep(0.3)  # polite delay between detail-page requests
 
     return results
 

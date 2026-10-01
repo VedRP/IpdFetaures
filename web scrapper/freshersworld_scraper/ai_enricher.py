@@ -235,7 +235,12 @@ def _merge(original: dict, enriched: dict) -> dict:
     if not result.get("field") and enriched.get("field"):
         result["field"] = [f for f in enriched["field"] if isinstance(f, str)]
 
-    if not result.get("summary") and enriched.get("summary"):
+    # Never overwrite/set an AI-hallucinated summary when a real scraped
+    # description already exists - format_internship.py derives a proper
+    # summary from that real text. Previously this always fired for every
+    # item, since raw scraped items never had a "summary" key at all,
+    # meaning every FreshersWorld summary was synthetic, not real text.
+    if not result.get("summary") and not result.get("description") and enriched.get("summary"):
         result["summary"] = str(enriched["summary"])[:400]
 
     if not result.get("responsibilities") and enriched.get("responsibilities"):
@@ -289,7 +294,7 @@ def enrich_batch(items: list) -> list:
     needs_idx  = []   # indices into `items` that need enrichment
     for i, item in enumerate(items):
         if (not item.get("skills")
-                or not item.get("summary")
+                or (not item.get("summary") and not item.get("description"))
                 or not item.get("responsibilities")
                 or not item.get("degree")
                 or not item.get("field")):

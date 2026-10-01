@@ -292,7 +292,10 @@ _GENERIC_TITLES: list[str] = [
     "Social Entrepreneurship",
     "Crowdfunding",
     "Program Assistant",
-    # Generic tech
+    # Generic tech (safe to keep now that genericity_score uses
+    # token_sort_ratio, not token_set_ratio — see that function's docstring
+    # for the false positive this previously caused on specific titles like
+    # "SDET Intern (Software Development Engineer in Test)")
     "Software Development",
     "Web Development",
     "App Development",
@@ -312,9 +315,21 @@ def genericity_score(title: str) -> float:
     """
     Fuzzy similarity of *title* to the curated generic-title list.
 
-    Uses ``rapidfuzz.fuzz.token_set_ratio`` (handles word-order and partial
-    overlaps well) so "Business Development Executive" still scores high
-    against "Business Development".
+    Uses ``rapidfuzz.fuzz.token_sort_ratio`` — NOT ``token_set_ratio``.
+    ``token_set_ratio` was tried first and found to be a real bug: it
+    deliberately ignores extra/non-shared words, so ANY title sharing even
+    one common word with a list entry (e.g. "Development") scored close to
+    1.0 regardless of how specific the rest of the title was. Verified on
+    real data: "SDET Intern (Software Development Engineer in Test)" — a
+    specific technical role — scored 0.71-1.0 against "Business
+    Development"/"Web Development" purely from the shared word.
+    ``token_sort_ratio`` sorts tokens and compares as a sequence, so it
+    naturally penalizes length differences — extra qualifying words correctly
+    pull the score down instead of being ignored — while still matching
+    "Business Development Executive" reasonably against "Business
+    Development" (0.58, below the generic threshold, appropriately: having
+    a specific qualifier like "- Fintech Vertical" makes a title LESS
+    generic, not equally generic).
 
     Returns
     -------
@@ -333,7 +348,7 @@ def genericity_score(title: str) -> float:
 
     title_lc = title.strip().lower()
     best = max(
-        fuzz.token_set_ratio(title_lc, generic) / 100.0
+        fuzz.token_sort_ratio(title_lc, generic) / 100.0
         for generic in _GENERIC_TITLES_LC
     )
     return round(float(min(best, 1.0)), 4)

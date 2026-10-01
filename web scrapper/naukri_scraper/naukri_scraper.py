@@ -8,6 +8,23 @@ Strategy:
     e.g. /job-listings-software-developer-siemens-bengaluru-0-to-1-years-090426929138
     → company: Siemens, location: Bengaluru, experience: 0-1 Yrs
   - Card text is SECONDARY (enriches with salary, posted date, description)
+  - DETAIL PAGE (fetch_full_job_description): visited once per listing after
+    the search-results pass, for a full "Description" block (Role &
+    responsibilities, Preferred candidate profile, Employment Type,
+    Education, Key Skills, About company) plus a real "Openings: N" count -
+    none of this is present in the search-results card text. Verified live
+    that Naukri's detail pages are a client-rendered Next.js SPA (same
+    `_next/static` pattern as Unstop) - a plain HTTP GET returns only the
+    page shell, so this genuinely requires a rendered Selenium visit, unlike
+    the Unstop/LetsIntern fixes which just stopped discarding already-
+    fetched text.
+    IMPORTANT: Naukri's own platform shows a standard scam-warning
+    disclaimer ("Beware of imposters! ... registration fee, Refundable
+    Fee...") on every listing's detail page - this is platform boilerplate,
+    not signal about that specific posting, and must be excluded or it would
+    trigger scam_detector's hard-disqualifying rule on nearly every Naukri
+    record. Extraction is bounded to the "Description" ... "Company Info"
+    section specifically to exclude it (see fetch_full_job_description).
   - DOM walking is structure-independent (no class/id assumptions)
 
 Install:
@@ -18,7 +35,12 @@ import re
 import json
 import time
 import logging
+import os
+import sys
 from typing import Optional
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from format_internship import format_and_save
 
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -553,6 +575,61 @@ def parse_internship(link_el, href: str, driver) -> Optional[dict]:
 
 
 # ============================================================================
+#  DETAIL PAGE ENRICHMENT
+# ============================================================================
+
+_DETAIL_END_MARKERS = ("Beware of imposters", "Similar roles", "Similar jobs")
+
+
+def fetch_full_job_description(driver, url: str, timeout: int = 15) -> tuple[str, Optional[int]]:
+    """
+    Visit a Naukri job detail page (client-rendered SPA - requires a real
+    page load, not a plain HTTP GET) and extract:
+      1. The full job description block: everything from the "Description"
+         heading up to (but excluding) Naukri's standard scam-warning
+         disclaimer or the unrelated "Similar roles"/"Similar jobs" footer
+         that appears on every listing page. Includes Role & responsibilities,
+         Preferred candidate profile, Employment Type, Education, Key Skills,
+         and About company - all richer than the search-card preview.
+      2. A real openings count from the page header ("Openings: N"), if
+         present - the search-card text never contains this.
+
+    Returns (description, openings). description is "" and openings is None
+    on any failure - callers should fall back to the card-based values.
+    """
+    try:
+        driver.get(url)
+        WebDriverWait(driver, timeout).until(
+            EC.presence_of_element_located((By.TAG_NAME, "body"))
+        )
+        time.sleep(2)
+        body_text = driver.find_element(By.TAG_NAME, "body").text
+    except Exception as e:
+        log.debug("fetch_full_job_description failed for %s: %s", url, e)
+        return "", None
+
+    description = ""
+    start_idx = body_text.find("Description")
+    if start_idx != -1:
+        text = body_text[start_idx + len("Description"):]
+        end_idx = len(text)
+        for marker in _DETAIL_END_MARKERS:
+            i = text.find(marker)
+            if i != -1:
+                end_idx = min(end_idx, i)
+        description = re.sub(r"\s+", " ", text[:end_idx]).strip()
+
+    openings = None
+    om = re.search(r"\bOpenings\s*:?\s*(\d+)\b", body_text, re.IGNORECASE)
+    if om:
+        n = int(om.group(1))
+        if 1 <= n <= 500:
+            openings = n
+
+    return description, openings
+
+
+# ============================================================================
 #  SCRAPE ONE PAGE
 # ============================================================================
 def scrape_page(driver: webdriver.Chrome, page_num: int) -> list:
@@ -639,6 +716,22 @@ def scrape_page(driver: webdriver.Chrome, page_num: int) -> list:
             log.debug("  [%d/%d] error: %s", idx, len(seen), e)
 
     log.info("Page %d: %d extracted from %d links", page_num, len(results), len(seen))
+
+    # ── Detail-page enrichment pass ─────────────────────────────────────────
+    # Done as a SEPARATE pass (not interleaved above) because navigating away
+    # from the search-results page invalidates the remaining `link_el`
+    # element handles used for card-based extraction.
+    log.info("Page %d: enriching %d items with full detail-page descriptions…", page_num, len(results))
+    for idx, item in enumerate(results, 1):
+        full_desc, real_openings = fetch_full_job_description(driver, item["link"])
+        if full_desc and len(full_desc) > len(item.get("description") or ""):
+            item["description"] = full_desc
+        if real_openings is not None:
+            item["openings"] = real_openings
+        log.debug("  [%d/%d] enriched (desc_len=%d, openings=%s)",
+                  idx, len(results), len(item["description"]), item["openings"])
+        time.sleep(0.5)  # polite delay between detail-page visits
+
     return results
 
 
@@ -705,12 +798,12 @@ def main():
     # Save raw
     save_json(all_items, OUTPUT_RAW)
 
-    # Dedup + final
+    # Dedup + raw
     unique = deduplicate(all_items)
     log.info("After dedup: %d", len(unique))
-    save_json(unique, OUTPUT_FINAL)
+    save_json(unique, OUTPUT_RAW)
 
-    # Quality report
+    # Quality report (on raw field names, before standardization)
     fields = ["company", "location", "stipend", "duration", "posted", "description"]
     log.info("=== DATA COMPLETENESS ===")
     for f in fields:
@@ -723,8 +816,21 @@ def main():
     for role, cnt in Counter(i.get("type", "Other") for i in unique).most_common():
         log.info("  %-30s %d", role, cnt)
 
-    print(f"\nTotal internships scraped: {len(unique)}")
-    return unique
+    # NOTE: previously this wrote `unique` directly to OUTPUT_FINAL with no
+    # standardization at all - format_internship.py was never called for
+    # this scraper. Naukri's raw field names (title/description/link) never
+    # matched the standardized schema (name/summary/applyLink) that
+    # scam_detector and the rest of the pipeline read, meaning every
+    # text-based signal silently saw empty strings for every Naukri record.
+    formatted = format_and_save(
+        unique,
+        source="naukri",
+        output_path=OUTPUT_FINAL,
+    )
+    log.info("Saved %d formatted internships → %s", len(formatted), OUTPUT_FINAL)
+
+    print(f"\nTotal internships scraped: {len(formatted)}")
+    return formatted
 
 
 if __name__ == "__main__":
