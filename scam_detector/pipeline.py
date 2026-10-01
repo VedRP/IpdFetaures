@@ -432,6 +432,7 @@ def feature_vector_to_rule_input(
         training_program_disguised_as_internship=fv.text.training_program_disguised_as_internship,
         zero_shot_scam_category=fv.text.zero_shot_scam_category,
         zero_shot_scam_confidence=fv.text.zero_shot_scam_confidence,
+        scam_corpus_similarity=fv.text.scam_corpus_similarity,
         urgency_score=urg_score,
         genericity_score=fv.text.genericity_score,
         caps_ratio=fv.text.caps_ratio,

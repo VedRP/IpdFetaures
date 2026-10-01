@@ -65,6 +65,7 @@ class RuleInput:
     training_program_disguised_as_internship: bool = False
     zero_shot_scam_category: str | None = None
     zero_shot_scam_confidence: float = 0.0
+    scam_corpus_similarity: float = 0.0
     urgency_score: float = 0.0
     genericity_score: float = 0.0
     caps_ratio: float = 0.0
@@ -444,6 +445,83 @@ class ZeroShotSemanticScamRule:
             weight=w,
             triggered=False,
             explanation="No semantic scam-behavior pattern detected (or classifier disabled).",
+        )
+
+
+class SimilarToConfirmedScamRule:
+    """
+    Rule 1f: posting is semantically near-identical to a listing a human
+    moderator already confirmed as a scam (the feedback loop).
+
+    This is the mechanism that makes confirmed scams generalize beyond the
+    same company reposting under its own name (which ``company_reputation_
+    score`` already catches) to a DIFFERENT company using similar wording -
+    e.g. a template scam reused by a new shell company. SBERT cosine
+    similarity is computed against every confirmed_scam record in
+    FeedbackStore (see ``get_scam_corpus_embeddings`` /
+    ``scam_corpus_similarity`` in text_features.py) - this was previously
+    computed every run but silently discarded, feeding neither this rule
+    nor the anomaly model.
+
+    Weight: 0.70 (default) — high, since it's grounded in verified human
+    ground truth rather than a heuristic pattern, but deliberately kept
+    below the 0.75 hard-reject threshold: semantic similarity at this
+    threshold is strong but not infallible (two unrelated postings in a
+    narrow category, e.g. both generic "data entry" roles, could
+    legitimately score high without being the same scam).
+
+    Threshold calibration (0.85, measured with all-MiniLM-L6-v2): tested
+    whether a lower threshold would catch more reworded clones without
+    false-flagging unrelated postings — it would not. A near-identical scam
+    clone with one word changed scored 0.998; a heavily-reworded paraphrase
+    of the same underlying template scored only 0.61 (would evade almost
+    any reasonable threshold — an inherent limit of semantic similarity for
+    determined rewording, not a bug). Critically, an UNRELATED legitimate
+    posting (different company, same job category as a confirmed scam)
+    scored 0.71 similarity to that scam — higher than two unrelated
+    legitimate postings scored against each other (0.50). A threshold
+    anywhere near 0.71 would false-flag unrelated legitimate postings for
+    being topically similar. 0.85 sits safely above that false-positive
+    zone while still catching near-identical/lightly-reworded clones.
+
+    Empty/no feedback yet: ``scam_corpus_similarity`` defaults to 0.0 and
+    this rule never triggers until at least one confirmed_scam label
+    exists - it has no effect before the feedback loop has any data.
+    """
+
+    rule_id = "similar_to_confirmed_scam"
+
+    def __init__(self, config: Config | None = None) -> None:
+        self._cfg = config or _default_cfg
+
+    def evaluate(self, inp: RuleInput) -> RuleFinding:
+        w = self._cfg.rule_weights.similar_to_confirmed_scam
+        threshold = self._cfg.rule_thresholds.scam_corpus_similarity_threshold
+        sim = inp.scam_corpus_similarity
+
+        if sim >= threshold:
+            return RuleFinding(
+                rule_id=self.rule_id,
+                description="Near-identical to a human-confirmed scam posting",
+                weight=w,
+                triggered=True,
+                explanation=(
+                    f"This posting is semantically near-identical (similarity = "
+                    f"{sim:.2f}, threshold = {threshold:.2f}) to a listing a "
+                    f"moderator already confirmed was a scam — likely the same "
+                    f"template reused under a different company name."
+                ),
+            )
+
+        return RuleFinding(
+            rule_id=self.rule_id,
+            description="Near-identical to a human-confirmed scam posting",
+            weight=w,
+            triggered=False,
+            explanation=(
+                f"Not closely similar to any confirmed scam on record "
+                f"(similarity = {sim:.2f})."
+            ),
         )
 
 
@@ -1099,6 +1177,7 @@ def _default_rules(config: Config | None = None) -> list[Rule]:
         ExternalFormHandoffRule(cfg),
         TrainingProgramDisguisedAsInternshipRule(cfg),
         ZeroShotSemanticScamRule(cfg),
+        SimilarToConfirmedScamRule(cfg),
         UpfrontFeeAndPayToWorkRule(cfg),
         StipendPerkContradictionRule(cfg),
         CrossCompanyDuplicateRule(cfg),

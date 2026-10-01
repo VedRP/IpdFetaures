@@ -31,12 +31,21 @@ class BlendWeights(BaseModel):
     Weights for blending rules-engine score with anomaly-model score and optional supervised model.
 
     Default: 60% rules / 40% anomaly / 0% supervised. When supervised model is active, weights are normalized.
+
+    reputation_weight was raised from 0.10 to 0.25: validated end-to-end
+    that a single confirmed_scam feedback label immediately raises
+    reputation_score to 1.0 for any other listing from that company, but at
+    0.10 that only moved an otherwise-clean listing's score by ~9 points
+    (e.g. 0.0 -> 9.09) - nowhere near enough to meaningfully flag a repeat
+    offender on its own. At 0.25 the same case reaches ~20 points, and it
+    meaningfully compounds with any other signal on the listing rather than
+    being diluted into irrelevance.
     """
 
     rules_weight: float = Field(default=0.60, ge=0.0, le=1.0)
     anomaly_weight: float = Field(default=0.40, ge=0.0, le=1.0)
     supervised_weight: float = Field(default=0.0, ge=0.0, le=1.0)
-    reputation_weight: float = Field(default=0.10, ge=0.0, le=1.0)
+    reputation_weight: float = Field(default=0.25, ge=0.0, le=1.0)
 
 
 
@@ -72,6 +81,7 @@ class RuleWeights(BaseModel):
     training_program_disguised_as_internship: float = Field(default=0.65, ge=0.0, le=1.0)
     zero_shot_semantic_scam_signal: float = Field(default=0.55, ge=0.0, le=1.0)
     young_domain_age: float = Field(default=0.55, ge=0.0, le=1.0)
+    similar_to_confirmed_scam: float = Field(default=0.70, ge=0.0, le=1.0)
     upfront_fee_and_pay_to_work: float = Field(default=0.90, ge=0.0, le=1.0)
     cross_company_duplicate: float = Field(default=0.80, ge=0.0, le=1.0)
     typosquat_domain: float = Field(default=0.70, ge=0.0, le=1.0)
@@ -113,6 +123,10 @@ class RuleThresholds(BaseModel):
     # ATS links are gated out before the WHOIS lookup even happens (see
     # extract_company_url_features in company_features.py).
     young_domain_age_days_threshold: int = Field(default=90, ge=0)
+
+    # SimilarToConfirmedScamRule: minimum SBERT cosine similarity to a
+    # human-confirmed scam posting (from the feedback loop) to trigger.
+    scam_corpus_similarity_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
 
     # Minimum peer group size required to compute stable z-scores
     min_peer_group_size: int = Field(

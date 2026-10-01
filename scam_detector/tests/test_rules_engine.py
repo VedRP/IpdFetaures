@@ -45,6 +45,7 @@ from scam_detector.scoring.rules_engine import (
     TrainingProgramDisguisedAsInternshipRule,
     ZeroShotSemanticScamRule,
     YoungDomainAgeRule,
+    SimilarToConfirmedScamRule,
     NgoFundraisingStipendNetworkRule,
     StipendPerkContradictionRule,
     CrossCompanyDuplicateRule,
@@ -480,6 +481,78 @@ class TestYoungDomainAgeRule:
     def test_custom_threshold_reflected(self) -> None:
         rule = YoungDomainAgeRule(config=_cfg_thresholds(young_domain_age_days_threshold=365))
         finding = rule.evaluate(RuleInput(domain_age_days=200))
+        assert finding.triggered is True
+
+    # ── Return type ───────────────────────────────────────────────────────
+
+    def test_returns_rule_finding_instance(self) -> None:
+        assert isinstance(self.rule.evaluate(_clean()), RuleFinding)
+
+
+# ===========================================================================
+# TestSimilarToConfirmedScamRule
+# ===========================================================================
+
+class TestSimilarToConfirmedScamRule:
+
+    def setup_method(self) -> None:
+        self.rule = SimilarToConfirmedScamRule()
+
+    # ── Trigger ───────────────────────────────────────────────────────────
+
+    def test_triggers_above_threshold(self) -> None:
+        finding = self.rule.evaluate(RuleInput(scam_corpus_similarity=0.90))
+        assert finding.triggered is True
+
+    def test_triggers_at_exact_threshold(self) -> None:
+        # default threshold is 0.85 - must trigger AT the threshold, not just above
+        finding = self.rule.evaluate(RuleInput(scam_corpus_similarity=0.85))
+        assert finding.triggered is True
+
+    def test_triggered_rule_id_correct(self) -> None:
+        finding = self.rule.evaluate(RuleInput(scam_corpus_similarity=0.95))
+        assert finding.rule_id == "similar_to_confirmed_scam"
+
+    def test_triggered_weight_matches_config_default(self) -> None:
+        finding = self.rule.evaluate(RuleInput(scam_corpus_similarity=0.95))
+        assert finding.weight == pytest.approx(0.70)
+
+    def test_weight_below_hard_reject_threshold(self) -> None:
+        # Deliberate design choice: strong but not an automatic hard reject
+        assert self.rule.evaluate(RuleInput(scam_corpus_similarity=0.95)).weight < 0.75
+
+    def test_explanation_mentions_similarity_value(self) -> None:
+        finding = self.rule.evaluate(RuleInput(scam_corpus_similarity=0.91))
+        assert "0.91" in finding.explanation
+
+    # ── No-trigger ────────────────────────────────────────────────────────
+
+    def test_does_not_trigger_on_clean_input(self) -> None:
+        # scam_corpus_similarity defaults to 0.0 - no feedback yet means no effect
+        finding = self.rule.evaluate(_clean())
+        assert finding.triggered is False
+
+    def test_does_not_trigger_below_threshold(self) -> None:
+        finding = self.rule.evaluate(RuleInput(scam_corpus_similarity=0.50))
+        assert finding.triggered is False
+
+    def test_non_triggered_weight_still_set(self) -> None:
+        finding = self.rule.evaluate(_clean())
+        assert finding.weight == pytest.approx(0.70)
+
+    # ── Weight / threshold configurability ──────────────────────────────────
+
+    def test_custom_weight_reflected_in_finding(self) -> None:
+        rule = SimilarToConfirmedScamRule(config=_cfg(similar_to_confirmed_scam=0.40))
+        finding = rule.evaluate(RuleInput(scam_corpus_similarity=0.95))
+        assert finding.weight == pytest.approx(0.40)
+        assert finding.triggered is True
+
+    def test_custom_threshold_reflected(self) -> None:
+        rule = SimilarToConfirmedScamRule(
+            config=_cfg_thresholds(scam_corpus_similarity_threshold=0.60)
+        )
+        finding = rule.evaluate(RuleInput(scam_corpus_similarity=0.65))
         assert finding.triggered is True
 
     # ── Return type ───────────────────────────────────────────────────────

@@ -41,6 +41,7 @@ _TEXT_FIELDS: tuple[str, ...] = (
     "artifact_count",
     "sensitive_info_requested",
     "boilerplate_similarity",
+    "scam_corpus_similarity",
 )
 
 _COMPANY_FIELDS: tuple[str, ...] = (
