@@ -167,3 +167,135 @@ def test_api_benchmark_sample() -> None:
     assert "f1_score" in data
     assert "latency_ms_per_record" in data
 
+
+def _make_record(idx: int, is_scam: bool) -> dict:
+    if is_scam:
+        return {
+            "_id": f"rec-{idx}",
+            "name": "URGENT PAYMENT NEEDED FOR INTERNSHIP",
+            "company": "Digital Marketing",
+            "summary": "Pay Rs 5000 registration fee to get this internship. Send bank details.",
+            "stipend": "Unpaid",
+            "perks": ["Stipend"],
+            "applyLink": "http://bit.ly/fake-link",
+            "isRemote": True,
+        }
+    return {
+        "_id": f"rec-{idx}",
+        "name": "Software Engineering Intern",
+        "company": "Google LLC",
+        "summary": "Join our engineering team to build scalable systems in Python and C++.",
+        "stipend": {"type": "fixed", "amount": 25000, "currency": "INR", "period": "monthly"},
+        "perks": ["Certificate", "Letter of recommendation"],
+        "applyLink": "https://careers.google.com/jobs/123",
+        "isRemote": False,
+        "skills": ["Python", "C++"],
+        "field": ["Engineering"],
+    }
+
+
+@pytest.fixture
+def isolated_cfg(tmp_path, monkeypatch):
+    """Point every store the new endpoints touch at tmp_path so tests never
+    read or write the repo's real feedback/vote/model files."""
+    import scam_detector.api as api_module
+
+    monkeypatch.setattr(api_module.cfg.feedback, "store_path", str(tmp_path / "feedback.jsonl"))
+    monkeypatch.setattr(
+        api_module.cfg.feedback, "applicant_vote_store_path", str(tmp_path / "votes.jsonl")
+    )
+    monkeypatch.setattr(
+        api_module.cfg.supervised, "model_path", str(tmp_path / "models" / "supervised_model.joblib")
+    )
+    monkeypatch.setattr(
+        api_module.cfg.supervised, "versions_dir", str(tmp_path / "models" / "versions")
+    )
+    monkeypatch.setattr(
+        api_module.cfg.supervised,
+        "retrain_history_path",
+        str(tmp_path / "models" / "retrain_history.jsonl"),
+    )
+    monkeypatch.setattr(api_module.cfg.supervised, "min_training_samples", 40)
+    return api_module.cfg
+
+
+@pytest.mark.skipif(not _FASTAPI_AVAILABLE, reason="FastAPI is not installed")
+def test_api_applicant_vote_single_does_not_promote(isolated_cfg) -> None:
+    app = create_app()
+    client = TestClient(app)
+    response = client.post(
+        "/applicant-vote", json={"record_id": "r1", "applicant_id": "a1", "is_scam": True}
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["recorded"] is True
+    assert data["total_votes_for_record"] == 1
+    assert data["promoted_to_feedback"] is False  # one vote is never enough
+
+
+@pytest.mark.skipif(not _FASTAPI_AVAILABLE, reason="FastAPI is not installed")
+def test_api_applicant_vote_promotes_on_agreement(isolated_cfg) -> None:
+    app = create_app()
+    client = TestClient(app)
+    # DEFAULT_MIN_VOTES is 3 — promotion happens on the 3rd agreeing vote,
+    # not before.
+    for i in range(2):
+        response = client.post(
+            "/applicant-vote",
+            json={"record_id": "r1", "applicant_id": f"a{i}", "is_scam": True},
+        )
+        assert response.json()["promoted_to_feedback"] is False
+
+    response = client.post(
+        "/applicant-vote", json={"record_id": "r1", "applicant_id": "a2", "is_scam": True}
+    )
+    assert response.status_code == 200
+    assert response.json()["promoted_to_feedback"] is True
+
+
+@pytest.mark.skipif(not _FASTAPI_AVAILABLE, reason="FastAPI is not installed")
+def test_api_retrain_insufficient_data(isolated_cfg) -> None:
+    app = create_app()
+    client = TestClient(app)
+    response = client.post("/retrain", json={"records": [_make_record(1, False)]})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["trained"] is False
+    assert data["promoted"] is False
+
+
+@pytest.mark.skipif(not _FASTAPI_AVAILABLE, reason="FastAPI is not installed")
+def test_api_retrain_trains_and_promotes(isolated_cfg) -> None:
+    from scam_detector.feedback import FeedbackStore, ReviewFeedback
+
+    feedback_store = FeedbackStore(isolated_cfg.feedback.store_path)
+    records = []
+    for i in range(60):
+        is_scam = (i % 2 == 0)
+        records.append(_make_record(i, is_scam))
+        decision = "confirmed_scam" if is_scam else "confirmed_legit"
+        feedback_store.record_feedback(
+            ReviewFeedback(record_id=f"rec-{i}", reviewer_decision=decision)
+        )
+
+    app = create_app()
+    client = TestClient(app)
+    response = client.post("/retrain", json={"records": records})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["trained"] is True
+    assert data["promoted"] is True
+    assert data["candidate_auc"] is not None
+
+
+@pytest.mark.skipif(not _FASTAPI_AVAILABLE, reason="FastAPI is not installed")
+def test_api_retrain_history_reflects_cycles(isolated_cfg) -> None:
+    app = create_app()
+    client = TestClient(app)
+    client.post("/retrain", json={"records": [_make_record(1, False)]})
+    response = client.get("/retrain/history")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["cycles"]) == 1
+    assert data["cycles"][0]["trained"] is False
+

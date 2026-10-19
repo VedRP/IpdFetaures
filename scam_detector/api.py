@@ -11,6 +11,9 @@ Endpoints:
   - POST /explain         -> Human review report rendering and feature attribution breakdown
   - POST /feedback        -> Record a moderator approve/reject decision (human-in-the-loop)
   - GET  /feedback/stats  -> Progress toward calibration/supervised-model label thresholds
+  - POST /applicant-vote  -> Record one applicant's post-hoc scam/not_scam report (weak label)
+  - POST /retrain         -> Run one automated retraining cycle for the supervised classifier
+  - GET  /retrain/history -> Past retraining cycle outcomes (trained/promoted/AUC/versions)
 """
 
 from __future__ import annotations
@@ -201,6 +204,67 @@ class FeedbackStatsResponse(BaseModel):
     supervised_min_required: int
     calibration_ready: bool
     supervised_ready: bool
+
+
+class ApplicantVoteRequest(BaseModel):
+    """
+    One applicant's post-hoc report, asked only when they return to the
+    site: "was this internship a scam?" — never anything richer than yes/no.
+
+    This is a weak label, not a verdict: see applicant_feedback.py for why
+    it's aggregated across many applicants and confidence-weighted rather
+    than trusted on its own. Not called by any frontend route yet.
+    """
+
+    record_id: str = Field(description="The internship's _id, exactly as scored")
+    applicant_id: str = Field(
+        default="",
+        description="Opaque applicant identifier, used only for de-duplicating "
+                    "repeat votes from the same person; never stored elsewhere.",
+    )
+    is_scam: bool = Field(description="True = applicant reports it was a scam; False = legitimate")
+
+
+class ApplicantVoteResponse(BaseModel):
+    record_id: str
+    recorded: bool
+    total_votes_for_record: int
+    scam_votes_for_record: int
+    promoted_to_feedback: bool = Field(
+        description="True if this vote pushed the record's aggregate over the "
+                     "volume+agreement threshold and it was just promoted into "
+                     "the main feedback store (see applicant_feedback.py)."
+    )
+    message: str
+
+
+class RetrainRequest(BaseModel):
+    """
+    Trigger one retraining cycle for the supervised classifier.
+
+    ``records`` must be the current corpus of internship records (same
+    shape as /score/batch) — retraining re-derives features for whatever
+    record_ids have feedback, and needs the raw records to do so.
+    """
+
+    records: list[dict[str, Any]] = Field(..., min_length=1)
+
+
+class RetrainResponse(BaseModel):
+    trained: bool
+    promoted: bool
+    reason: str
+    n_labeled: int
+    n_train: int
+    n_holdout: int
+    candidate_auc: Optional[float]
+    incumbent_auc: Optional[float]
+    model_version_path: Optional[str]
+    timestamp: str
+
+
+class RetrainHistoryResponse(BaseModel):
+    cycles: list[RetrainResponse]
 
 
 # ---------------------------------------------------------------------------
@@ -484,6 +548,116 @@ def create_app() -> Any:
             supervised_min_required=_SUPERVISED_MIN_SAMPLES,
             calibration_ready=calibration_ready,
             supervised_ready=supervised_ready,
+        )
+
+    @app.post("/applicant-vote", response_model=ApplicantVoteResponse)
+    def record_applicant_vote(req: ApplicantVoteRequest) -> ApplicantVoteResponse:
+        """
+        Record one applicant's post-hoc scam/not_scam report.
+
+        A single vote never changes any score by itself — see
+        applicant_feedback.py. If this vote happens to push the record's
+        aggregate over the volume+agreement threshold, it's promoted into
+        the main feedback store right away (same place a moderator
+        decision lands), with a confidence proportional to vote volume.
+        """
+        try:
+            from scam_detector.applicant_feedback import (
+                ApplicantVote,
+                ApplicantVoteStore,
+                aggregate_votes,
+                promote_votes_to_feedback,
+            )
+
+            vote_store = ApplicantVoteStore(cfg.feedback.applicant_vote_store_path)
+            vote_store.record_vote(
+                ApplicantVote(
+                    record_id=req.record_id,
+                    applicant_id=req.applicant_id,
+                    vote="scam" if req.is_scam else "not_scam",
+                )
+            )
+
+            feedback_store = FeedbackStore(cfg.feedback.store_path)
+            already_fed_back_before = {
+                fb.record_id for fb in feedback_store.load_feedback_history()
+            }
+            promoted = promote_votes_to_feedback(vote_store, feedback_store)
+            just_promoted = req.record_id not in already_fed_back_before and any(
+                fb.record_id == req.record_id for fb in promoted
+            )
+
+            agg = aggregate_votes(vote_store.load_votes()).get(req.record_id)
+            total_votes = agg.total_votes if agg else 0
+            scam_votes = agg.scam_votes if agg else 0
+
+            return ApplicantVoteResponse(
+                record_id=req.record_id,
+                recorded=True,
+                total_votes_for_record=total_votes,
+                scam_votes_for_record=scam_votes,
+                promoted_to_feedback=just_promoted,
+                message=(
+                    f"Recorded. {total_votes} vote(s) so far for this listing "
+                    f"({scam_votes} reporting scam)."
+                    + (" Promoted to the feedback store." if just_promoted else "")
+                ),
+            )
+        except Exception as exc:
+            log.exception("Error recording applicant vote: %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc))
+
+    @app.post("/retrain", response_model=RetrainResponse)
+    def trigger_retrain(req: RetrainRequest) -> RetrainResponse:
+        """
+        Run one automated retraining cycle for the supervised classifier
+        (see retrain.py). Intended to be called by a scheduler/admin action,
+        not a frontend route. Safe to call anytime — it no-ops with a
+        `trained=False` reason whenever there isn't enough labeled data yet,
+        and never overwrites the live model with a candidate that doesn't
+        beat it on held-out data.
+        """
+        try:
+            from scam_detector.retrain import run_retraining_cycle
+
+            result = run_retraining_cycle(req.records, config=cfg)
+            return RetrainResponse(
+                trained=result.trained,
+                promoted=result.promoted,
+                reason=result.reason,
+                n_labeled=result.n_labeled,
+                n_train=result.n_train,
+                n_holdout=result.n_holdout,
+                candidate_auc=result.candidate_auc,
+                incumbent_auc=result.incumbent_auc,
+                model_version_path=result.model_version_path,
+                timestamp=result.timestamp.isoformat(),
+            )
+        except Exception as exc:
+            log.exception("Error during retraining cycle: %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc))
+
+    @app.get("/retrain/history", response_model=RetrainHistoryResponse)
+    def get_retrain_history() -> RetrainHistoryResponse:
+        from scam_detector.retrain import load_retrain_history
+
+        history = load_retrain_history(cfg.supervised.retrain_history_path)
+        return RetrainHistoryResponse(
+            cycles=[
+                RetrainResponse(
+                    trained=r.trained,
+                    promoted=r.promoted,
+                    reason=r.reason,
+                    n_labeled=r.n_labeled,
+                    n_train=r.n_train,
+                    n_holdout=r.n_holdout,
+                    candidate_auc=r.candidate_auc,
+                    incumbent_auc=r.incumbent_auc,
+                    model_version_path=r.model_version_path,
+                    timestamp=r.timestamp.isoformat(),
+                )
+                for r in history
+            ]
         )
 
     return app
