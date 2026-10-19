@@ -21,3 +21,6 @@ test_kaggle_internship.py
 output_*.json
 *_scored.json
 scam_detector/reputation.jsonl
+scam_detector/feedback.jsonl
+scam_detector/applicant_votes.jsonl
+scam_detector/rule_firings.jsonl

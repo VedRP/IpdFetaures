@@ -38,6 +38,7 @@ try:
 except ImportError:
     HAS_LIGHTGBM = False
 
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.ensemble import GradientBoostingClassifier
 
 log = logging.getLogger("scam_detector.scoring.supervised_model")
@@ -155,9 +156,16 @@ class SupervisedScamModel:
         feature_cols = [c for c in df_features.columns]
         X = merged[feature_cols].fillna(0.0)
         y = merged["label"].astype(int)
+        # Confidence-weighted samples: a moderator's direct decision counts
+        # fully (weight=1.0); a decision auto-promoted from aggregated,
+        # noisy applicant votes (see applicant_feedback.py) counts
+        # proportionally to how much agreement/volume backed it — so a
+        # thin, barely-promoted vote set barely moves the classifier while
+        # a strongly-agreeing one counts close to a full label.
+        sample_weight = merged["weight"].astype(float) if "weight" in merged.columns else None
 
         if HAS_LIGHTGBM:
-            clf = lgb.LGBMClassifier(
+            base_clf = lgb.LGBMClassifier(
                 n_estimators=100,
                 learning_rate=0.05,
                 random_state=42,
@@ -165,7 +173,7 @@ class SupervisedScamModel:
             )
             backend_name = "lightgbm"
         else:
-            clf = GradientBoostingClassifier(
+            base_clf = GradientBoostingClassifier(
                 n_estimators=100,
                 learning_rate=0.05,
                 random_state=42,
@@ -173,7 +181,24 @@ class SupervisedScamModel:
             backend_name = "sklearn"
 
         log.info("Fitting %s on %d labeled rows with %d features", backend_name, len(X), len(feature_cols))
-        clf.fit(X, y)
+
+        # Calibrate so the output is a genuine probability, blendable with
+        # the noisy-OR rule score the same way reputation_score and
+        # scam_corpus_similarity are blended — not a raw, miscalibrated
+        # classifier margin. Isotonic needs enough rows per CV fold, so it
+        # only engages once there's a comfortable sample size; otherwise we
+        # fall back to the uncalibrated classifier rather than fail training.
+        min_rows_for_calibration = 100
+        if len(X) >= min_rows_for_calibration:
+            fit_kwargs = {"sample_weight": sample_weight} if sample_weight is not None else {}
+            clf = CalibratedClassifierCV(base_clf, method="isotonic", cv=3)
+            clf.fit(X, y, **fit_kwargs)
+        else:
+            clf = base_clf
+            if sample_weight is not None:
+                clf.fit(X, y, sample_weight=sample_weight)
+            else:
+                clf.fit(X, y)
 
         self._model = clf
         self._feature_columns = feature_cols

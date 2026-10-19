@@ -103,17 +103,35 @@ def company_reputation_score(
     if rep.total_postings <= 0:
         return None
 
-    # Check FeedbackStore for confirmed scams
+    # Check FeedbackStore for confirmed scams.
+    #
+    # A moderator's direct confirmation (confidence=1.0) still flips the
+    # company straight to 1.0, as before. A decision auto-promoted from
+    # aggregated applicant votes (source="applicant_vote_aggregate")
+    # carries a fractional confidence instead — a thin, barely-promoted
+    # vote set (e.g. just above the minimum) should raise suspicion
+    # without being able to nuke a real company's reputation outright.
+    # The highest-confidence confirmed_scam found for this company wins.
+    scam_floor = 0.0
     if feedback_store is not None:
         try:
             feedback_history = feedback_store.load_feedback_history()
             company_record_ids = set(rep.record_ids)
+            best_confidence = 0.0
             for fb in feedback_history:
                 if (
                     fb.reviewer_decision == "confirmed_scam"
                     and fb.record_id in company_record_ids
                 ):
-                    return 1.0
+                    best_confidence = max(best_confidence, fb.confidence)
+            if best_confidence >= 1.0:
+                return 1.0
+            if best_confidence > 0.0:
+                # Blend toward 1.0 proportionally to confidence, but never
+                # let a low-confidence single report alone fully condemn
+                # the company — the track-record-based score below still
+                # contributes through the max().
+                scam_floor = best_confidence
         except Exception as exc:
             log.warning(
                 "Failed to check feedback store for company reputation: %s",
@@ -128,5 +146,6 @@ def company_reputation_score(
     ) / rep.total_postings
     avg_score_risk = rep.average_scam_score / 100.0
     reputation_score = 0.5 * decision_risk + 0.5 * avg_score_risk
+    reputation_score = max(reputation_score, scam_floor)
 
     return round(max(0.0, min(1.0, reputation_score)), 4)

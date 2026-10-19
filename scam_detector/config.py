@@ -213,6 +213,7 @@ class FeatureFlags(BaseModel):
     enable_structural_features: bool = True
     enable_ml_risk_engine: bool = False  # off until a trained model is present
     enable_shap_anomaly_explanations: bool = True  # use SHAP TreeExplainer for anomaly explanations
+    enable_adaptive_rule_weights: bool = False  # off until enough feedback-joined firings exist; see rule_precision.py
 
 
 class EmbeddingConfig(BaseModel):
@@ -275,6 +276,32 @@ class FeedbackConfig(BaseModel):
     store_path: str = Field(
         default="scam_detector/feedback.jsonl",
         description="Path to the append-only JSONL review-feedback store",
+    )
+    applicant_vote_store_path: str = Field(
+        default="scam_detector/applicant_votes.jsonl",
+        description=(
+            "Path to the append-only JSONL store of raw per-applicant "
+            "scam/not_scam votes (see applicant_feedback.py), before they "
+            "are aggregated and promoted into the main feedback store."
+        ),
+    )
+    rule_firing_log_path: str = Field(
+        default="scam_detector/rule_firings.jsonl",
+        description=(
+            "Path to the append-only JSONL log of which rules fired for "
+            "which record_id on each pipeline run — joined against "
+            "feedback outcomes to compute live per-rule precision "
+            "(see scoring/rule_precision.py)."
+        ),
+    )
+    min_firing_observations_for_adjustment: int = Field(
+        default=20,
+        ge=1,
+        description=(
+            "Minimum confidence-weighted feedback-joined firings a rule "
+            "needs before its weight is adjusted from live precision at "
+            "all — below this, the rule stays at its config.py default."
+        ),
     )
 
 

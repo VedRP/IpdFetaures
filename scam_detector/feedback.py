@@ -57,6 +57,23 @@ class ReviewFeedback(BaseModel):
         default_factory=lambda: datetime.now(timezone.utc),
         description="UTC time the feedback was recorded",
     )
+    confidence: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "How much this single label should count during training/aggregation. "
+            "A moderator's direct decision is full confidence (1.0). A decision "
+            "auto-promoted from aggregated, noisy applicant votes (see "
+            "applicant_feedback.py) carries a fractional confidence that grows "
+            "with vote volume — see VoteAggregate.confidence."
+        ),
+    )
+    source: Literal["moderator", "applicant_vote_aggregate"] = Field(
+        default="moderator",
+        description="Where this label came from, for auditability and for "
+                     "weighting training data differently by provenance.",
+    )
 
 
 class FeedbackStore:
@@ -143,8 +160,10 @@ def build_training_labels(feedback_history: list[ReviewFeedback]) -> pd.DataFram
             columns=[
                 "record_id",
                 "label",
+                "weight",
                 "reviewer_decision",
                 "reviewer_notes",
+                "source",
                 "timestamp",
             ]
         )
@@ -153,8 +172,10 @@ def build_training_labels(feedback_history: list[ReviewFeedback]) -> pd.DataFram
         {
             "record_id": fb.record_id,
             "label": _LABEL_MAP[fb.reviewer_decision],
+            "weight": fb.confidence,
             "reviewer_decision": fb.reviewer_decision,
             "reviewer_notes": fb.reviewer_notes,
+            "source": fb.source,
             "timestamp": fb.timestamp,
         }
         for fb in feedback_history

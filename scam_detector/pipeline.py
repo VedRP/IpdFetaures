@@ -538,15 +538,28 @@ def process_records(
     ngo_min_companies = cfg.rule_thresholds.ngo_stipend_min_distinct_companies
 
     # ── Per-record features (Prompts 2–5) ─────────────────────────────────
-    from scam_detector.features.text_features import get_scam_corpus_embeddings
+    from scam_detector.features.text_features import build_scam_corpus_index
     from scam_detector.feedback import FeedbackStore
     from scam_detector.features.reputation_features import ReputationStore, company_reputation_score
 
     feedback_store = FeedbackStore(cfg.feedback.store_path)
     rep_store = ReputationStore(cfg.reputation.store_path)
 
+    # Promote any sufficiently-agreeing batches of applicant yes/no votes
+    # into the moderator feedback store before this run's scoring uses it.
+    # Not wired to any frontend route yet — this is a no-op until applicant
+    # votes actually exist in applicant_votes.jsonl.
     try:
-        scam_embeddings = get_scam_corpus_embeddings(feedback_store, records)
+        from scam_detector.applicant_feedback import ApplicantVoteStore, promote_votes_to_feedback
+
+        promote_votes_to_feedback(
+            ApplicantVoteStore(cfg.feedback.applicant_vote_store_path), feedback_store
+        )
+    except Exception as exc:
+        log.warning("Applicant-vote promotion skipped: %s", exc)
+
+    try:
+        scam_embeddings = build_scam_corpus_index(feedback_store, records)
     except Exception:
         scam_embeddings = None
 
@@ -627,8 +640,12 @@ def process_records(
             log.warning("SupervisedScamModel failed (%s) — supervised scores default to None", exc)
 
     # ── Prompts 6 + 8: rules + risk engine ────────────────────────────────
-    rules_engine = RulesEngine(config=cfg)
+    from scam_detector.scoring.rule_precision import RuleFiringStore, get_adjusted_config
+
+    rules_cfg = get_adjusted_config(cfg)
+    rules_engine = RulesEngine(config=rules_cfg)
     risk_engine = RiskEngine(config=cfg)
+    firing_store = RuleFiringStore(cfg.feedback.rule_firing_log_path)
     outputs: list[dict[str, Any]] = []
     decisions: list[str] = []
 
@@ -646,6 +663,11 @@ def process_records(
         )
         rule_result = rules_engine.run(rule_input)
         confidence = compute_confidence_score(rem, fv, config=cfg)
+
+        try:
+            firing_store.log_firing(_record_id(raw, i), rule_result.triggered_rule_ids)
+        except Exception as exc:
+            log.warning("Failed to log rule firing for record %d: %s", i, exc)
 
         company_name = raw.get("company") or ""
         if fv.company.is_suspect or not company_name.strip():
@@ -684,6 +706,7 @@ def process_records(
         }
         out["hard_disqualifying_forced"] = result.hard_disqualifying_forced
         out["low_confidence_forced_review"] = result.low_confidence_forced_review
+        out["scam_family"] = fv.text.scam_family
         out["shared_infrastructure"] = shared_infra_flags[i]
         out["duplicate_cluster_network_size"] = cluster_network_sizes[i]
         outputs.append(out)

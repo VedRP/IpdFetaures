@@ -141,6 +141,15 @@ class TextFeatureVector(BaseModel):
     # 7. Boilerplate / near-duplicate similarity
     boilerplate_similarity: float = Field(default=0.0, ge=0.0, le=1.0)
     scam_corpus_similarity: float = Field(default=0.0, ge=0.0, le=1.0)
+    scam_family: str | None = Field(
+        default=None,
+        description=(
+            "Human-readable label of the confirmed-scam cluster this "
+            "posting most resembles (e.g. 'Training/Certificate'), for "
+            "moderator explainability. None until the scam corpus is large "
+            "enough to cluster meaningfully (see scam_clustering.py)."
+        ),
+    )
 
 
     # Pass-through remediation flags — affect score discounting
@@ -924,32 +933,242 @@ def get_scam_corpus_embeddings(
     """
     Build and return L2-normalised SBERT embeddings matrix of confirmed scam records
     pulled from FeedbackStore.
+
+    Thin backwards-compatible wrapper kept for existing callers/tests that
+    only need the raw matrix. New code should use :func:`build_scam_corpus_index`
+    instead, which additionally carries recency-decay weights and scam-family
+    cluster labels.
+    """
+    index = build_scam_corpus_index(feedback_store, all_records)
+    return index.embeddings if index is not None else None
+
+
+# ---------------------------------------------------------------------------
+# 8b. Scam corpus index — weighted, decaying, clustered
+# ---------------------------------------------------------------------------
+
+class ScamCorpusIndex:
+    """
+    SBERT embeddings of every confirmed-scam feedback record, plus the
+    metadata needed for weighted similarity and scam-family clustering.
+
+    ``weights`` decay each embedding's influence by recency (half-life
+    ``half_life_days``) so that old, possibly stale scam tactics don't
+    outweigh a cluster of recent, similar reports — scam tactics drift
+    over time, so what was confirmed a year ago should count for less
+    than what was confirmed last week.
+
+    ``cluster_labels``/``cluster_names`` group the corpus into distinct
+    scam "families" (e.g. upfront-fee, training-disguise, fake-stipend)
+    once there's enough corpus volume to cluster meaningfully (>= 10
+    confirmed scams). Below that, both stay ``None`` — this is expected,
+    not a bug, the same way ReputationStore is a no-op on first-seen data.
+    """
+
+    __slots__ = ("embeddings", "weights", "record_ids", "cluster_labels", "cluster_names")
+
+    def __init__(
+        self,
+        embeddings: np.ndarray,
+        weights: np.ndarray,
+        record_ids: list[str],
+        cluster_labels: np.ndarray | None = None,
+        cluster_names: dict[int, str] | None = None,
+    ) -> None:
+        self.embeddings = embeddings
+        self.weights = weights
+        self.record_ids = record_ids
+        self.cluster_labels = cluster_labels
+        self.cluster_names = cluster_names
+
+
+_MIN_RECORDS_TO_CLUSTER = 10
+_MAX_SCAM_FAMILIES = 8
+_DEFAULT_HALF_LIFE_DAYS = 90.0
+
+_FAMILY_NAME_STOPWORDS = {
+    "the", "and", "for", "with", "this", "that", "will", "are", "your",
+    "you", "our", "from", "have", "has", "all", "any", "can", "job", "jobs",
+    "internship", "internships", "intern", "work", "company", "team",
+    "role", "apply", "about", "more", "into", "they", "them", "what",
+}
+
+
+def _tokenize_for_family_naming(text: str) -> list[str]:
+    return [
+        w for w in re.findall(r"[a-z]{4,}", text.lower())
+        if w not in _FAMILY_NAME_STOPWORDS
+    ]
+
+
+def _name_scam_clusters(texts: list[str], labels: np.ndarray, k: int) -> dict[int, str]:
+    """Auto-label each cluster by the words most over-represented in it
+    relative to the rest of the corpus (a cheap, dependency-free stand-in
+    for a real topic model — good enough for a moderator-facing hint)."""
+    from collections import Counter, defaultdict
+
+    global_counts: Counter = Counter()
+    per_cluster_counts: dict[int, Counter] = defaultdict(Counter)
+    for text, label in zip(texts, labels):
+        toks = _tokenize_for_family_naming(text)
+        global_counts.update(toks)
+        per_cluster_counts[int(label)].update(toks)
+
+    total_global = sum(global_counts.values()) or 1
+    names: dict[int, str] = {}
+    for cid in range(k):
+        counts = per_cluster_counts.get(cid)
+        if not counts:
+            names[cid] = f"Scam pattern {cid + 1}"
+            continue
+        total_cluster = sum(counts.values()) or 1
+        scored = [
+            (word, (c / total_cluster) / ((global_counts[word] / total_global) + 1e-6))
+            for word, c in counts.items()
+            if c >= 2
+        ]
+        scored.sort(key=lambda x: -x[1])
+        top_words = [w for w, _ in scored[:2]]
+        names[cid] = "/".join(w.title() for w in top_words) if top_words else f"Scam pattern {cid + 1}"
+    return names
+
+
+def build_scam_corpus_index(
+    feedback_store: Any | None = None,
+    all_records: list[dict[str, Any]] | None = None,
+    half_life_days: float = _DEFAULT_HALF_LIFE_DAYS,
+) -> ScamCorpusIndex | None:
+    """
+    Build the full weighted, clustered scam-corpus index from FeedbackStore.
+
+    Returns ``None`` whenever there isn't yet a usable corpus (no store, no
+    confirmed scams, or sentence-transformers unavailable) — callers must
+    treat that as "no signal", not an error.
     """
     if feedback_store is None or all_records is None:
         return None
 
     try:
+        from datetime import datetime, timezone as _tz
+
         history = feedback_store.load_feedback_history()
-        scam_ids = {fb.record_id for fb in history if fb.reviewer_decision == "confirmed_scam"}
-        if not scam_ids:
+        scam_fb_by_id = {
+            fb.record_id: fb for fb in history if fb.reviewer_decision == "confirmed_scam"
+        }
+        if not scam_fb_by_id:
             return None
 
         from scam_detector.features.duplicate_detection import _record_id, _record_text
-        scam_texts = [
-            _record_text(r)
-            for i, r in enumerate(all_records)
-            if _record_id(r, i) in scam_ids
-        ]
-        if not scam_texts:
+        record_ids: list[str] = []
+        texts: list[str] = []
+        for i, r in enumerate(all_records):
+            rid = _record_id(r, i)
+            if rid in scam_fb_by_id:
+                record_ids.append(rid)
+                texts.append(_record_text(r))
+        if not texts:
             return None
 
         model = _sbert_model()
         if model is None:
             return None
 
-        return model.encode(scam_texts, normalize_embeddings=True, show_progress_bar=False).astype(np.float32)
+        embeddings = model.encode(
+            texts, normalize_embeddings=True, show_progress_bar=False
+        ).astype(np.float32)
+
+        now = datetime.now(_tz.utc)
+        weights = np.array(
+            [
+                0.5 ** (
+                    max(0.0, (now - scam_fb_by_id[rid].timestamp).total_seconds() / 86400.0)
+                    / half_life_days
+                )
+                * scam_fb_by_id[rid].confidence
+                for rid in record_ids
+            ],
+            dtype=np.float32,
+        )
+
+        cluster_labels = None
+        cluster_names = None
+        m = len(record_ids)
+        if m >= _MIN_RECORDS_TO_CLUSTER:
+            try:
+                from sklearn.cluster import KMeans
+
+                k = min(_MAX_SCAM_FAMILIES, max(2, m // 5))
+                km = KMeans(n_clusters=k, n_init=10, random_state=42)
+                cluster_labels = km.fit_predict(embeddings)
+                cluster_names = _name_scam_clusters(texts, cluster_labels, k)
+            except Exception:
+                cluster_labels = None
+                cluster_names = None
+
+        return ScamCorpusIndex(
+            embeddings=embeddings,
+            weights=weights,
+            record_ids=record_ids,
+            cluster_labels=cluster_labels,
+            cluster_names=cluster_names,
+        )
     except Exception:
         return None
+
+
+def scam_corpus_similarity_weighted(
+    text: str,
+    index: ScamCorpusIndex | None,
+    top_k: int = 5,
+) -> tuple[float, str | None]:
+    """
+    Recency- and confidence-weighted similarity of *text* against the scam
+    corpus, plus (if clustered) the nearest scam-family label.
+
+    Unlike the plain max-match in :func:`scam_corpus_similarity`, this
+    aggregates the top-``k`` most similar confirmed scams, weighted by how
+    recent/confident each one is, so a single coincidentally-similar old
+    report can't trigger the rule on its own, while a cluster of several
+    moderately-similar recent reports can.
+
+    Returns
+    -------
+    (similarity, scam_family) — similarity in [0, 1]; scam_family is the
+    cluster label of the single closest match, or None if the corpus isn't
+    clustered yet.
+    """
+    if index is None or index.embeddings.size == 0 or not text or not text.strip():
+        return 0.0, None
+
+    model = _sbert_model()
+    if model is None:
+        return 0.0, None
+
+    try:
+        emb = model.encode([text.strip()], normalize_embeddings=True)[0]
+        sims = index.embeddings @ emb  # shape (M,)
+
+        k = min(top_k, len(sims))
+        top_idx = np.argpartition(-sims, k - 1)[:k]
+        top_idx = top_idx[np.argsort(-sims[top_idx])]
+
+        top_sims = sims[top_idx]
+        top_w = index.weights[top_idx]
+        if float(top_w.sum()) <= 0.0:
+            score = float(top_sims.max())
+        else:
+            score = float(np.average(top_sims, weights=top_w))
+        score = round(float(np.clip(score, 0.0, 1.0)), 4)
+
+        family = None
+        if index.cluster_labels is not None and index.cluster_names is not None:
+            closest = int(top_idx[0])
+            cluster_id = int(index.cluster_labels[closest])
+            family = index.cluster_names.get(cluster_id)
+
+        return score, family
+    except Exception:
+        return 0.0, None
 
 
 # ---------------------------------------------------------------------------
@@ -958,7 +1177,7 @@ def get_scam_corpus_embeddings(
 
 def extract_text_features(
     record: dict[str, Any],
-    scam_embeddings: np.ndarray | list[list[float]] | None = None,
+    scam_embeddings: "np.ndarray | list[list[float]] | ScamCorpusIndex | None" = None,
 ) -> TextFeatureVector:
     """
     Extract all text features from a remediated internship record.
@@ -1040,8 +1259,14 @@ def extract_text_features(
     # 6e. Optional pretrained zero-shot semantic scam signal (opt-in, off by default)
     zero_shot_category, zero_shot_confidence = zero_shot_scam_signal(pattern_scan_text)
 
-    # 7. Scam corpus similarity
-    scam_sim = scam_corpus_similarity(full_text, scam_embeddings)
+    # 7. Scam corpus similarity — weighted/decaying + family match when a
+    # ScamCorpusIndex is supplied; falls back to the plain max-match for
+    # callers still passing a raw embeddings matrix (backwards compat).
+    scam_family: str | None = None
+    if isinstance(scam_embeddings, ScamCorpusIndex):
+        scam_sim, scam_family = scam_corpus_similarity_weighted(full_text, scam_embeddings)
+    else:
+        scam_sim = scam_corpus_similarity(full_text, scam_embeddings)
 
     word_count = len(full_text.split()) if full_text.strip() else 0
     char_count = len(full_text)
@@ -1065,6 +1290,7 @@ def extract_text_features(
         zero_shot_scam_confidence=zero_shot_confidence,
         boilerplate_similarity=0.0,   # injected by duplicate-detection stage
         scam_corpus_similarity=scam_sim,
+        scam_family=scam_family,
         summary_truncated=summary_truncated,
         responsibilities_cleaned=responsibilities_cleaned,
         word_count=word_count,

@@ -152,6 +152,62 @@ def test_risk_engine_blend_with_supervised_score():
     assert result.scam_score > 30.0  # supervised score raised the blended score
 
 
+def test_fit_accepts_confidence_weighted_feedback(tmp_path: Path):
+    """
+    Weak-label feedback auto-promoted from applicant votes (see
+    applicant_feedback.py) carries confidence < 1.0. fit() must accept it as
+    a per-sample weight rather than erroring or silently ignoring it.
+    """
+    model_file = tmp_path / "weighted_model.joblib"
+    model = SupervisedScamModel(model_path=model_file, min_training_samples=50)
+
+    records, fvs, feedback = [], [], []
+    for i in range(60):
+        is_scam = (i % 2 == 0)
+        rec = _make_dummy_record(i, is_scam=is_scam)
+        records.append(rec)
+        fvs.append(extract_all(rec))
+        decision = "confirmed_scam" if is_scam else "confirmed_legit"
+        # Half the rows are low-confidence applicant-vote promotions.
+        confidence = 0.3 if i % 4 == 0 else 1.0
+        source = "applicant_vote_aggregate" if confidence < 1.0 else "moderator"
+        feedback.append(
+            ReviewFeedback(
+                record_id=f"rec-{i}",
+                reviewer_decision=decision,
+                confidence=confidence,
+                source=source,
+            )
+        )
+
+    fitted_model = model.fit(records, fvs, feedback, min_samples=50)
+    assert fitted_model.is_fitted
+
+
+def test_fit_with_calibration_at_scale(tmp_path: Path):
+    """At >=100 rows, fit() should engage isotonic calibration without error
+    and still produce valid probabilities."""
+    model_file = tmp_path / "calibrated_model.joblib"
+    model = SupervisedScamModel(model_path=model_file, min_training_samples=100)
+
+    records, fvs, feedback = [], [], []
+    for i in range(120):
+        is_scam = (i % 2 == 0)
+        rec = _make_dummy_record(i, is_scam=is_scam)
+        records.append(rec)
+        fvs.append(extract_all(rec))
+        decision = "confirmed_scam" if is_scam else "confirmed_legit"
+        feedback.append(ReviewFeedback(record_id=f"rec-{i}", reviewer_decision=decision))
+
+    fitted_model = model.fit(records, fvs, feedback, min_samples=100)
+    assert fitted_model.is_fitted
+
+    scam_rec = _make_dummy_record(999, is_scam=True)
+    res = fitted_model.score_record(extract_all(scam_rec), record=scam_rec)
+    assert res.model_available is True
+    assert 0.0 <= res.scam_probability <= 1.0
+
+
 def test_pipeline_with_supervised_model(tmp_path: Path):
     # Setup trained model
     model_file = tmp_path / "supervised_model.joblib"
