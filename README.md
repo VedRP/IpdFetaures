@@ -38,6 +38,10 @@ FastAPI service that orchestrates background scraping jobs across platforms (`gi
 
 ## 🛡 2. Scam Detector Pipeline (`scam_detector`)
 
+> 📖 **Full system reference** (theory, architecture diagrams, every rule
+> and weight, the feedback/self-learning system, API reference, config
+> reference, limitations): **[`scam_detector/README.md`](scam_detector/README.md)**
+
 Multi-stage fraud mitigation and data-quality engine protecting users from fake listings, advance fees, upfront credential harvesting, and shell company recruiters.
 
 ### Pipeline Stages
