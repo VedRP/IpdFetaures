@@ -112,6 +112,7 @@ class SupervisedScamModel:
         feedback_history: list[ReviewFeedback],
         *,
         min_samples: int | None = None,
+        autosave: bool = True,
     ) -> SupervisedScamModel:
         """
         Train the supervised model on labeled feedback history joined with
@@ -206,7 +207,8 @@ class SupervisedScamModel:
         self._backend = backend_name
         self._is_fitted = True
 
-        self.save()
+        if autosave:
+            self.save()
         return self
 
     def save(self, path: str | Path | None = None) -> None:

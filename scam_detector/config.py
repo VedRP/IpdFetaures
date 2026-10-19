@@ -245,6 +245,36 @@ class SupervisedModelConfig(BaseModel):
         ge=1,
         description="Minimum labeled records required to train supervised model",
     )
+    versions_dir: str = Field(
+        default="scam_detector/models/versions",
+        description="Directory holding every retrain attempt's model artifact, for audit/rollback.",
+    )
+    retrain_history_path: str = Field(
+        default="scam_detector/models/retrain_history.jsonl",
+        description="Append-only JSONL log of every retraining-cycle outcome (see retrain.py).",
+    )
+    holdout_fraction: float = Field(
+        default=0.2,
+        ge=0.05,
+        le=0.5,
+        description="Fraction of labeled data held out (stratified) to evaluate a retrain candidate before promotion.",
+    )
+    min_auc_improvement: float = Field(
+        default=-0.01,
+        description=(
+            "A retrain candidate is promoted over the incumbent model only if "
+            "candidate_auc >= incumbent_auc + min_auc_improvement. The small "
+            "negative default tolerates noise-level regression on a small "
+            "holdout rather than blocking routine retrains, while still "
+            "rejecting a candidate that's genuinely worse."
+        ),
+    )
+    min_class_balance: float = Field(
+        default=0.05,
+        ge=0.0,
+        le=0.5,
+        description="Retraining refuses to run if the minority class is below this fraction of labeled data.",
+    )
 
 
 class CalibrationConfig(BaseModel):
