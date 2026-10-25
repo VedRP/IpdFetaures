@@ -65,8 +65,8 @@ log = logging.getLogger("fw")
 TARGET       = 300        # Stop after collecting this many unique internships
 PAGE_LIMIT   = 20         # Items per page (Freshersworld default)
 PAGE_WAIT    = 8          # Seconds to wait for page load
-OUTPUT_RAW   = "freshersworld_scraper/fw_raw.json"
-OUTPUT_FINAL = "freshersworld_scraper/fw_internships.json"
+OUTPUT_RAW   = "fw_raw.json"
+OUTPUT_FINAL = "fw_internships.json"
 
 BASE_URL = "https://www.freshersworld.com"
 
